@@ -135,6 +135,18 @@ if ! node -e \
 fi
 echo "PASS environment-override-takes-precedence-over-derived-value"
 
+empty_override_json="$({
+  T3CODE_RELAY_URL='' \
+    node "${repo_root}/.github/fork/public-config.mjs" bundle "$upstream_bundle" --overrides
+})"
+if ! node -e \
+  'const value = JSON.parse(process.argv[1]); if (value.T3CODE_RELAY_URL !== process.argv[2]) process.exit(1)' \
+  "$empty_override_json" 'https://relay.example.invalid'; then
+  echo "FAIL empty-environment-override-uses-derived-value" >&2
+  exit 1
+fi
+echo "PASS empty-environment-override-uses-derived-value"
+
 package_fixture="${fixture_root}/package.json"
 printf '{"name":"generic","version":"1.0.0"}\n' >"$package_fixture"
 node "${repo_root}/.github/fork/set-package-version.mjs" \
