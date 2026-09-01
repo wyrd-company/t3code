@@ -8,6 +8,7 @@
 #     - .github/fork/release-version.mjs
 #     - .github/fork/bundle-node-pty.mjs
 #     - .github/fork/test-packer.mjs
+#     - .github/fork/test-release-package.mjs
 #     - .github/fork/test-workflows.mjs
 # ---
 set -euo pipefail
@@ -113,4 +114,5 @@ assert_fails release-tag-rejects-upstream-namespace \
   "${repo_root}/.github/fork/release-version.mjs" 'v0.0.37'
 
 node "${repo_root}/.github/fork/test-packer.mjs"
+node "${repo_root}/.github/fork/test-release-package.mjs"
 node "${repo_root}/.github/fork/test-workflows.mjs"
