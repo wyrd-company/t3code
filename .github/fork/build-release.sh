@@ -90,7 +90,7 @@ cleanup
 package_changed=false
 trap - EXIT
 
-if ! git diff --quiet -- apps/server/package.json; then
+if ! git diff --quiet HEAD -- "$package_json"; then
   echo "Build did not restore apps/server/package.json." >&2
   exit 1
 fi
