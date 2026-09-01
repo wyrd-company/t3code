@@ -6,6 +6,8 @@
 // ---
 import fs from "node:fs/promises";
 
+import { isForkVersion } from "./version.mjs";
+
 const [packagePath, version] = process.argv.slice(2);
 
 if (!packagePath || !version) {
@@ -13,7 +15,7 @@ if (!packagePath || !version) {
   process.exit(2);
 }
 
-if (!/^\d+\.\d+\.\d+-wyrd\.\d+$/.test(version)) {
+if (!isForkVersion(version)) {
   console.error(`Fork version must match <semver>-wyrd.<number>: ${version}`);
   process.exit(1);
 }
