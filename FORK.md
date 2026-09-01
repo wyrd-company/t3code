@@ -28,6 +28,7 @@ git switch mcp-external-registration
 git rebase "refs/tags/${new_base_tag}"
 printf '%s\n' "$new_base_commit" > .github/fork/base-tag
 printf '%s\n' "${new_base_tag#v}" > .github/fork/upstream-version
+# Update the base pin sentence above to name the new commit and tag.
 .github/fork/check-allowlist.sh
 ```
 
