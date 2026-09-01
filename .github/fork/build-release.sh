@@ -5,6 +5,7 @@
 #   calls:
 #     - .github/fork/set-package-version.mjs
 #     - .github/fork/assert-build-config.sh
+#     - .github/fork/build-node-pty.sh
 #     - .github/fork/pack-server.mjs
 #   used_by: .github/workflows/fork-release.yml
 # ---
@@ -20,12 +21,15 @@ output_directory="$2"
 repo_root="$(git rev-parse --show-toplevel)"
 package_json="${repo_root}/apps/server/package.json"
 package_backup="$(mktemp)"
+node_pty_prebuild_directory="$(mktemp -d)"
+node_pty_prebuild="${node_pty_prebuild_directory}/pty.node"
 
-restore_package_json() {
+cleanup() {
   cp "$package_backup" "$package_json"
   rm -f "$package_backup"
+  rm -rf "$node_pty_prebuild_directory"
 }
-trap restore_package_json EXIT
+trap cleanup EXIT
 
 cp "$package_json" "$package_backup"
 node "${repo_root}/.github/fork/set-package-version.mjs" "$package_json" "$version"
@@ -40,9 +44,11 @@ install -m 0755 \
   "${repo_root}/native/resource-monitor/target/release/t3-resource-monitor" \
   "${monitor_target}/t3-resource-monitor"
 
-node "${repo_root}/.github/fork/pack-server.mjs" "$version" "$output_directory"
+"${repo_root}/.github/fork/build-node-pty.sh" "$node_pty_prebuild"
+node "${repo_root}/.github/fork/pack-server.mjs" \
+  "$version" "$output_directory" "$node_pty_prebuild"
 
-restore_package_json
+cleanup
 trap - EXIT
 
 if ! git diff --quiet -- apps/server/package.json; then
