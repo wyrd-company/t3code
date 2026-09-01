@@ -98,6 +98,75 @@ jobs:
               "CD must not mutate package visibility or require package administration",
           )
 
+          publish = job("publish")
+          check(
+              "test_publish_image_name",
+              publish is not None
+              and "image=ghcr.io/wyrd-company/t3code-web" in publish,
+              "publish must produce ghcr.io/wyrd-company/t3code-web",
+          )
+          if publish is not None:
+              permissions_match = re.search(
+                  r"(?m)^    permissions:\n(?P<body>(?:^      [A-Za-z-]+: [A-Za-z]+\n)+)",
+                  publish,
+              )
+              permissions = (
+                  dict(
+                      re.findall(
+                          r"(?m)^      ([A-Za-z-]+): ([A-Za-z]+)$",
+                          permissions_match.group("body"),
+                      )
+                  )
+                  if permissions_match
+                  else {}
+              )
+              check(
+                  "test_publish_permissions_are_least_privilege",
+                  permissions
+                  == {
+                      "contents": "read",
+                      "packages": "write",
+                      "attestations": "write",
+                      "id-token": "write",
+                  },
+                  "publish permissions must be limited to checkout, push, and attestation",
+              )
+
+              def publish_env(name):
+                  match = re.search(rf"(?m)^      {name}: (?P<value>\S+)\s*$", publish)
+                  return match.group("value") if match else None
+
+              base_tag = publish_env("T3CODE_BASE_TAG")
+              base_commit = publish_env("T3CODE_BASE_COMMIT")
+              release_version = publish_env("T3CODE_RELEASE_VERSION")
+              check(
+                  "test_release_identity_is_distinct_from_upstream_base",
+                  base_tag is not None
+                  and base_tag.startswith("v")
+                  and release_version is not None
+                  and release_version != base_tag.removeprefix("v"),
+                  "fork release version must differ from the upstream base tag",
+              )
+              readme = Path("docker/t3code-web/README.md").read_text()
+              identity_guards = (
+                  '"$RELEASE_VERSION" != "$T3CODE_RELEASE_VERSION"',
+                  'git rev-parse "${T3CODE_BASE_TAG}^{commit}"',
+                  'grep --fixed-strings --quiet "$T3CODE_BASE_TAG"',
+                  'grep --fixed-strings --quiet "$T3CODE_BASE_COMMIT"',
+                  'grep --fixed-strings --quiet "web/${T3CODE_RELEASE_VERSION}"',
+              )
+              check(
+                  "test_release_identity_guards_and_docs_agree",
+                  base_tag is not None
+                  and base_commit is not None
+                  and release_version is not None
+                  and base_tag in readme
+                  and base_commit in readme
+                  and f"web/{release_version}" in readme
+                  and all(guard in publish for guard in identity_guards),
+                  "base and fork release identities must remain guarded and documented",
+              )
+
           anonymous = job("anonymous-arm64-smoke")
           check(
               "test_anonymous_proof_job_exists",
