@@ -21,6 +21,10 @@ if (!upstreamBundle || !overridesPath || !["json", "env0"].includes(format)) {
 
 const upstream = extractPublicConfig(NodeFS.readFileSync(upstreamBundle, "utf8"));
 const overrides = JSON.parse(NodeFS.readFileSync(overridesPath, "utf8"));
+for (const [name, value] of Object.entries(upstream)) {
+  if (value.trim() === "")
+    throw new Error(`Upstream derived public configuration is empty: ${name}`);
+}
 for (const name of Object.keys(overrides)) {
   if (!PUBLIC_CONFIG_NAMES.includes(name))
     throw new Error(`Unknown public configuration override: ${name}`);
