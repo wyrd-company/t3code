@@ -1,0 +1,94 @@
+# ---
+# relationships:
+#   builds: docker/t3code-web/Dockerfile
+#   verifies: docker/t3code-web/nginx.conf
+# ---
+name: Fork web image CI
+
+on:
+  pull_request:
+    branches:
+      - web-image
+  push:
+    branches:
+      - web-image
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-web-image-ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-and-smoke-test:
+    name: Build and smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      T3CODE_BASE_COMMIT: cefec32d6fc5d14f03e110ebdde534bdbcc9b62b
+      T3CODE_VERSION: 0.0.37
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Verify additive fork boundary
+        run: |
+          set -euo pipefail
+          git cat-file -e "${T3CODE_BASE_COMMIT}^{commit}"
+
+          violations="$(
+            git diff --name-status "${T3CODE_BASE_COMMIT}...HEAD" |
+              awk '$1 != "A" || ($2 !~ /^docker\/t3code-web\// && $2 !~ /^\.github\/workflows\/fork-web-image-(ci|cd)\.yml$/)'
+          )"
+          if [ -n "$violations" ]; then
+            printf 'Web image branch must contain only approved added files:\n%s\n' "$violations" >&2
+            exit 1
+          fi
+
+          grep --fixed-strings --quiet "v${T3CODE_VERSION}" docker/t3code-web/README.md
+          grep --fixed-strings --quiet "$T3CODE_BASE_COMMIT" docker/t3code-web/README.md
+
+      - name: Build image
+        run: |
+          docker build \
+            --build-arg T3CODE_VERSION="$T3CODE_VERSION" \
+            --tag t3code-web-ci:${{ github.sha }} \
+            --file docker/t3code-web/Dockerfile \
+            .
+
+      - name: Smoke test image
+        env:
+          IMAGE: t3code-web-ci:${{ github.sha }}
+        run: |
+          set -euo pipefail
+          name="t3code-web-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            docker rm --force "$name" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker run --detach --name "$name" "$IMAGE" >/dev/null
+
+          for _ in $(seq 1 30); do
+            if docker exec "$name" wget -q -O /dev/null http://127.0.0.1/; then
+              break
+            fi
+            sleep 1
+          done
+
+          index="$(docker exec "$name" wget -q -O - http://127.0.0.1/)"
+          pair="$(docker exec "$name" wget -q -O - http://127.0.0.1/pair)"
+          grep -q '<div id="root">' <<<"$index"
+          grep -q '<div id="root">' <<<"$pair"
+          docker exec "$name" test -f /usr/share/licenses/t3code/LICENSE
+          docker exec "$name" sh -c '! command -v node >/dev/null 2>&1 && ! command -v t3 >/dev/null 2>&1'
+
+          for _ in $(seq 1 10); do
+            health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$name")"
+            [ "$health" = healthy ] && break
+            sleep 1
+          done
+          test "$(docker inspect --format '{{.State.Health.Status}}' "$name")" = healthy
