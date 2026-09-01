@@ -26,8 +26,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
+      T3CODE_BASE_TAG: v0.0.37
       T3CODE_BASE_COMMIT: cefec32d6fc5d14f03e110ebdde534bdbcc9b62b
-      T3CODE_VERSION: 0.0.37
+      T3CODE_RELEASE_VERSION: 0.0.37-wyrd.1
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -38,6 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           git cat-file -e "${T3CODE_BASE_COMMIT}^{commit}"
+          test "$(git rev-parse "${T3CODE_BASE_TAG}^{commit}")" = "$T3CODE_BASE_COMMIT"
 
           violations="$(
             git diff --name-status "${T3CODE_BASE_COMMIT}...HEAD" |
@@ -48,8 +50,9 @@ jobs:
             exit 1
           fi
 
-          grep --fixed-strings --quiet "v${T3CODE_VERSION}" docker/t3code-web/README.md
+          grep --fixed-strings --quiet "$T3CODE_BASE_TAG" docker/t3code-web/README.md
           grep --fixed-strings --quiet "$T3CODE_BASE_COMMIT" docker/t3code-web/README.md
+          grep --fixed-strings --quiet "web/${T3CODE_RELEASE_VERSION}" docker/t3code-web/README.md
           workspace_vite_plus="$(awk '$1 == "vite-plus:" { print $2; exit }' pnpm-workspace.yaml)"
           docker_vite_plus="$(sed -n 's/^ARG VITE_PLUS_VERSION=//p' docker/t3code-web/Dockerfile)"
           test -n "$workspace_vite_plus"
@@ -59,10 +62,127 @@ jobs:
             exit 1
           fi
 
+      - name: Verify CD public pull contract
+        run: |
+          python3 - <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          workflow = Path(".github/workflows/fork-web-image-cd.yml").read_text()
+          failures = []
+
+          def check(name, condition, detail):
+              if condition:
+                  print(f"PASS: {name}")
+              else:
+                  failures.append(name)
+                  print(f"FAIL: {name}: {detail}", file=sys.stderr)
+
+          def job(name):
+              match = re.search(
+                  rf"(?ms)^  {re.escape(name)}:\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
+                  workflow,
+              )
+              return match.group("body") if match else None
+
+          forbidden_visibility_patterns = (
+              r"(?i)make image public",
+              r"(?i)/(?:orgs|users)/[^\s]+/packages/",
+              r"(?i)\bvisibility\s*=\s*public\b",
+              r"(?i)\bpackage[-_ ]?(?:admin|visibility)\b",
+          )
+          check(
+              "test_package_visibility_mutation_absent",
+              not any(re.search(pattern, workflow) for pattern in forbidden_visibility_patterns),
+              "CD must not mutate package visibility or require package administration",
+          )
+
+          anonymous = job("anonymous-arm64-smoke")
+          check(
+              "test_anonymous_proof_job_exists",
+              anonymous is not None,
+              "anonymous-arm64-smoke job is required",
+          )
+          if anonymous is not None:
+              check(
+                  "test_anonymous_proof_needs_publish",
+                  re.search(r"(?m)^    needs: publish\s*$", anonymous) is not None,
+                  "anonymous proof must depend on publish",
+              )
+              check(
+                  "test_anonymous_proof_has_no_permissions",
+                  re.search(r"(?m)^    permissions: \{\}\s*$", anonymous) is not None
+                  and re.search(r"(?m)^\s+(?:packages|contents):", anonymous) is None,
+                  "anonymous proof must have no package or contents permission",
+              )
+              credential_patterns = (
+                  r"\$\{\{\s*secrets\.",
+                  r"\$\{\{\s*github\.token",
+                  r"(?m)^\s+(?:GH_TOKEN|GITHUB_TOKEN):",
+                  r"(?m)^\s+token:",
+              )
+              check(
+                  "test_anonymous_proof_has_no_credentials",
+                  not any(re.search(pattern, anonymous) for pattern in credential_patterns),
+                  "anonymous proof must not receive a token or secret",
+              )
+              login_patterns = (
+                  r"docker/login-action",
+                  r"(?m)^\s*docker\s+login\b",
+                  r"(?m)^\s*(?:oras|skopeo)\s+login\b",
+              )
+              check(
+                  "test_anonymous_proof_has_no_registry_login",
+                  not any(re.search(pattern, anonymous, re.IGNORECASE) for pattern in login_patterns),
+                  "anonymous proof must not log in to a registry",
+              )
+              runner_temp = "$" + "{{ runner.temp }}/anonymous-docker-config"
+              check(
+                  "test_anonymous_proof_uses_isolated_docker_config",
+                  anonymous.count("DOCKER_CONFIG: " + runner_temp) == 2
+                  and 'mkdir -p "$DOCKER_CONFIG"' in anonymous
+                  and "printf '{\"auths\":{}}\\n' > \"$DOCKER_CONFIG/config.json\"" in anonymous
+                  and re.search(r"(?i)credsStore|credHelpers", anonymous) is None,
+                  "anonymous proof must use an empty Docker config without credential helpers",
+              )
+              expression = "$" + "{{"
+              published_image = (
+                  "IMAGE: "
+                  + expression
+                  + " needs.publish.outputs.image }}:"
+                  + expression
+                  + " needs.publish.outputs.version }}"
+              )
+              check(
+                  "test_anonymous_proof_pulls_published_image",
+                  published_image in anonymous
+                  and 'docker pull --platform linux/arm64 "$IMAGE"' in anonymous,
+                  "anonymous proof must pull the image and version produced by publish",
+              )
+              runtime_proof = (
+                  'docker run --detach --name "$name" --platform linux/arm64 "$IMAGE"',
+                  "test \"$(docker inspect --format '{{.State.Health.Status}}' \"$name\")\" = healthy",
+                  'docker exec "$name" test -f /usr/share/licenses/t3code/LICENSE',
+                  'wget -q -O - http://127.0.0.1/',
+                  'wget -q -O - http://127.0.0.1/pair',
+              )
+              check(
+                  "test_anonymous_proof_requires_runtime_success",
+                  "set -euo pipefail" in anonymous
+                  and "continue-on-error" not in anonymous
+                  and all(proof in anonymous for proof in runtime_proof),
+                  "anonymous proof must fail on pull, health, license, or HTTP runtime failure",
+              )
+
+          if failures:
+              sys.exit(1)
+          PY
+
       - name: Build image
         run: |
           docker build \
-            --build-arg T3CODE_VERSION="$T3CODE_VERSION" \
+            --build-arg T3CODE_VERSION="$T3CODE_RELEASE_VERSION" \
             --tag t3code-web-ci:${{ github.sha }} \
             --file docker/t3code-web/Dockerfile \
             .
@@ -70,6 +190,7 @@ jobs:
       - name: Smoke test image
         env:
           IMAGE: t3code-web-ci:${{ github.sha }}
+          T3CODE_VERSION: ${{ env.T3CODE_RELEASE_VERSION }}
         run: |
           set -euo pipefail
           name="t3code-web-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
