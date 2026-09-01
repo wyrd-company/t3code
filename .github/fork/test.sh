@@ -418,10 +418,13 @@ printf '%s\n' '[{"filename":"t3-0.0.37.tgz"}]'
 STUB
 chmod +x "$npm_release_stub"
 cp "$npm_release_stub" "${release_stubs}/npm"
-PATH="${release_stubs}:$PATH" \
-STUB_UPSTREAM_BUNDLE="$upstream_bundle" \
+if ! PATH="${release_stubs}:$PATH" \
+  STUB_UPSTREAM_BUNDLE="$upstream_bundle" \
   env -u NPM_COMMAND node "${repo_root}/.github/fork/public-config.mjs" \
-    package "$upstream_version" >/dev/null
+    package "$upstream_version" >/dev/null; then
+  echo "FAIL extractor-uses-default-npm-command" >&2
+  exit 1
+fi
 echo "PASS extractor-uses-default-npm-command"
 cat >"${release_stubs}/vp" <<'STUB'
 #!/usr/bin/env bash
