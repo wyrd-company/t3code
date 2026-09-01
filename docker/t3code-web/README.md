@@ -14,14 +14,15 @@ it with Nginx. It contains no T3 server, agent runtime, credentials, project
 files, or relay modifications.
 
 The `web-image` branch base is the upstream `v0.0.37` tag at
-`cefec32d6fc5d14f03e110ebdde534bdbcc9b62b`. The image source version comes from
-the `web/<version>` release tag; it does not use a downloaded source archive or
-a source checksum.
+`cefec32d6fc5d14f03e110ebdde534bdbcc9b62b`. The fork release identity is
+`web/0.0.37-wyrd.1`, which publishes image version `0.0.37-wyrd.1`. The image
+source version comes from the `web/<version>` release tag; it does not use a
+downloaded source archive or a source checksum.
 
 Published images support `linux/amd64` and `linux/arm64`:
 
 ```text
-ghcr.io/wyrd-company/t3code-web:<T3 Code version>
+ghcr.io/wyrd-company/t3code-web:0.0.37-wyrd.1
 ghcr.io/wyrd-company/t3code-web:latest
 ```
 
@@ -29,12 +30,12 @@ ghcr.io/wyrd-company/t3code-web:latest
 
 ```bash
 docker build \
-  --build-arg T3CODE_VERSION=0.0.37 \
-  --tag t3code-web:0.0.37 \
+  --build-arg T3CODE_VERSION=0.0.37-wyrd.1 \
+  --tag t3code-web:0.0.37-wyrd.1 \
   --file docker/t3code-web/Dockerfile \
   .
 
-docker run --rm --publish 8080:80 t3code-web:0.0.37
+docker run --rm --publish 8080:80 t3code-web:0.0.37-wyrd.1
 ```
 
 The browser connects directly to a separately deployed T3 server. When this
@@ -56,8 +57,9 @@ git diff --name-status v<new-version>...HEAD
 The final command must report only added files under `docker/t3code-web/` and
 `.github/workflows/`. After the rebase:
 
-1. Update `T3CODE_BASE_COMMIT` and `T3CODE_VERSION` in both fork web image
-   workflows.
+1. Update `T3CODE_BASE_TAG`, `T3CODE_BASE_COMMIT`, and
+   `T3CODE_RELEASE_VERSION` in both fork web image workflows. The release
+   version identifies the fork build and can differ from the upstream base.
 2. Update this README's base pin and local build example.
 3. Compare `ARG VITE_PLUS_VERSION` in the Dockerfile with
    `.catalog."vite-plus"` in `pnpm-workspace.yaml` and update it when needed.
