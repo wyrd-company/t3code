@@ -50,6 +50,10 @@ jobs:
 
           grep --fixed-strings --quiet "v${T3CODE_VERSION}" docker/t3code-web/README.md
           grep --fixed-strings --quiet "$T3CODE_BASE_COMMIT" docker/t3code-web/README.md
+          if grep -E 'T3CODE_SOURCE_SHA256|t3code/archive|sha256sum' docker/t3code-web/Dockerfile; then
+            echo 'Dockerfile must build the checked-out tree without a downloaded source archive.' >&2
+            exit 1
+          fi
 
       - name: Build image
         run: |
@@ -85,6 +89,9 @@ jobs:
           grep -q '<div id="root">' <<<"$pair"
           docker exec "$name" test -f /usr/share/licenses/t3code/LICENSE
           docker exec "$name" sh -c '! command -v node >/dev/null 2>&1 && ! command -v t3 >/dev/null 2>&1'
+          test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.description"}}' "$name")" = 'Unmodified static T3 Code web client'
+          test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.url"}}' "$name")" = 'https://github.com/pingdotgg/t3code'
+          test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$name")" = "$T3CODE_VERSION"
 
           for _ in $(seq 1 10); do
             health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$name")"
