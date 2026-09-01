@@ -5,6 +5,8 @@
 #     - .github/fork/check-allowlist.sh
 #     - .github/fork/assert-build-config.sh
 #     - .github/fork/set-package-version.mjs
+#     - .github/fork/release-version.mjs
+#     - .github/fork/test-workflows.mjs
 # ---
 set -euo pipefail
 
@@ -50,6 +52,8 @@ printf 'outside allowlist\n' >"${allowlist_repo}/upstream.txt"
 git -C "$allowlist_repo" add upstream.txt
 git -C "$allowlist_repo" commit --quiet -m rejected
 
+# $1 belongs to the nested shell.
+# shellcheck disable=SC2016
 assert_fails allowlist-rejects-upstream-edit \
   env FORK_BASE_TAG_FILE="${allowlist_repo}/.github/fork/base-tag" \
     FORK_ALLOWLIST_FILE="${allowlist_repo}/.github/fork/allowlist.txt" \
@@ -80,3 +84,16 @@ echo "PASS package-version-is-fork-distinguishable"
 
 assert_fails package-version-rejects-upstream-version \
   node "${repo_root}/.github/fork/set-package-version.mjs" "$package_fixture" '0.0.37'
+
+release_version="$("${repo_root}/.github/fork/release-version.mjs" \
+  'server/0.0.37-wyrd.1')"
+if [[ "$release_version" != '0.0.37-wyrd.1' ]]; then
+  echo "FAIL release-tag-yields-fork-version: ${release_version}" >&2
+  exit 1
+fi
+echo "PASS release-tag-yields-fork-version"
+
+assert_fails release-tag-rejects-upstream-namespace \
+  "${repo_root}/.github/fork/release-version.mjs" 'v0.0.37'
+
+node "${repo_root}/.github/fork/test-workflows.mjs"
