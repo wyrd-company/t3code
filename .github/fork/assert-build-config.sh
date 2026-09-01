@@ -2,26 +2,28 @@
 # ---
 # relationships:
 #   verifies: apps/server/vite.config.ts
-#   uses: .github/fork/public-config.mjs
+#   uses:
+#     - .github/fork/public-config.mjs
+#     - .github/fork/resolve-public-config.mjs
 #   used_by: .github/fork/build-release.sh
 # ---
 set -euo pipefail
 
-if (( $# != 2 )); then
-  echo "Usage: assert-build-config.sh <built-bundle> <upstream-bundle>" >&2
+if (( $# != 3 )); then
+  echo "Usage: assert-build-config.sh <built-bundle> <upstream-bundle> <operator-overrides-json>" >&2
   exit 2
 fi
 
-repo_root="$(git rev-parse --show-toplevel)"
-built_json="$(node "${repo_root}/.github/fork/public-config.mjs" bundle "$1")"
-upstream_json="$(node "${repo_root}/.github/fork/public-config.mjs" bundle "$2" --overrides)"
+script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+built_json="$(node "${script_directory}/public-config.mjs" bundle "$1")"
+expected_json="$(node "${script_directory}/resolve-public-config.mjs" "$2" "$3")"
 
-node - "$built_json" "$upstream_json" <<'NODE'
+node - "$built_json" "$expected_json" <<'NODE'
 const built = JSON.parse(process.argv[2]);
-const upstream = JSON.parse(process.argv[3]);
-for (const [name, expected] of Object.entries(upstream)) {
+const expectedConfig = JSON.parse(process.argv[3]);
+for (const [name, expected] of Object.entries(expectedConfig)) {
   if (expected.trim() === "") {
-    console.error(`Upstream derived public configuration is empty: ${name}`);
+    console.error(`Expected public configuration is empty: ${name}`);
     process.exit(1);
   }
   if (built[name].trim() === "") {
@@ -29,10 +31,10 @@ for (const [name, expected] of Object.entries(upstream)) {
     process.exit(1);
   }
   if (built[name] !== expected) {
-    console.error(`Built public configuration differs from upstream: ${name}`);
+    console.error(`Built public configuration differs from expected value: ${name}`);
     process.exit(1);
   }
 }
 NODE
 
-echo "Built server bundle matches every upstream public configuration value."
+echo "Built server bundle matches upstream public configuration and declared operator overrides."
