@@ -1,0 +1,9 @@
+# ---
+# relationships:
+#   used_by: .github/fork/check-allowlist.sh
+# ---
+# A trailing slash permits the complete subtree. Other entries are exact files.
+apps/server/src/mcp/
+apps/server/src/provider/Layers/ClaudeAdapter.ts
+apps/server/src/provider/Layers/CodexAdapter.ts
+apps/server/src/provider/Layers/CursorAdapter.ts
