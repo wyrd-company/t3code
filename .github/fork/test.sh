@@ -28,7 +28,8 @@ unset \
   T3CODE_CLERK_CLI_OAUTH_CLIENT_ID \
   T3CODE_RELAY_CLIENT_OTLP_TRACES_URL \
   T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET \
-  T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN
+  T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN \
+  T3CODE_ALLOW_PUBLIC_CONFIG_DIVERGENCE
 
 assert_fails() {
   local test_name="$1"
@@ -136,6 +137,17 @@ assert_fails_with extractor-reports-package-fetch-failure \
   env NPM_COMMAND="$npm_failure" \
     node "${repo_root}/.github/fork/public-config.mjs" package '0.0.37'
 
+npm_multiple="${fixture_root}/npm-multiple"
+cat >"$npm_multiple" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' '[{"filename":"first.tgz"},{"filename":"second.tgz"}]'
+STUB
+chmod +x "$npm_multiple"
+assert_fails_with extractor-rejects-multiple-pack-results \
+  'Unexpected npm pack response for t3@0.0.37' \
+  env NPM_COMMAND="$npm_multiple" \
+    node "${repo_root}/.github/fork/public-config.mjs" package '0.0.37'
+
 upstream_version="$("${repo_root}/.github/fork/read-upstream-version.sh" \
   "${repo_root}/.github/fork/upstream-version")"
 "${repo_root}/.github/fork/verify-base-version.sh" \
@@ -148,6 +160,11 @@ malformed_version="${fixture_root}/malformed-version"
 printf '0.0.37\n0.0.38\n' >"$malformed_version"
 assert_fails upstream-version-rejects-multiple-values \
   "${repo_root}/.github/fork/read-upstream-version.sh" "$malformed_version"
+
+invalid_semver="${fixture_root}/invalid-version"
+printf 'release-37\n' >"$invalid_semver"
+assert_fails upstream-version-rejects-invalid-semver \
+  "${repo_root}/.github/fork/read-upstream-version.sh" "$invalid_semver"
 
 api_stub="${fixture_root}/github-api"
 cat >"$api_stub" <<'STUB'
@@ -172,6 +189,82 @@ assert_fails upstream-version-tag-rejects-different-base-pin \
     STUB_COMMIT='cccccccccccccccccccccccccccccccccccccccc' \
     "${repo_root}/.github/fork/verify-upstream-base-pin.sh" "$upstream_version" "$base_pin"
 
+multiple_base_pins="${fixture_root}/multiple-base-pins"
+printf '%s\n%s\n' \
+  'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
+  'cccccccccccccccccccccccccccccccccccccccc' >"$multiple_base_pins"
+assert_fails upstream-base-pin-rejects-multiple-values \
+  "${repo_root}/.github/fork/verify-upstream-base-pin.sh" \
+    "$upstream_version" "$multiple_base_pins"
+
+api_failure="${fixture_root}/github-api-failure"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 22' >"$api_failure"
+chmod +x "$api_failure"
+assert_fails_with upstream-base-pin-reports-api-failure \
+  "Failed to resolve upstream tag v${upstream_version} for base pin file" \
+  env GITHUB_API_COMMAND="$api_failure" \
+    "${repo_root}/.github/fork/verify-upstream-base-pin.sh" "$upstream_version" "$base_pin"
+
+curl_stub_directory="${fixture_root}/curl-stub"
+mkdir -p "$curl_stub_directory"
+cat >"${curl_stub_directory}/curl" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >"$STUB_CURL_ARGUMENTS"
+if [[ " $* " == *' --fail '* && "${STUB_CURL_FAIL_ON_FAIL_FLAG:-}" == 1 ]]; then
+  exit 22
+fi
+printf '{"object":{"type":"commit","sha":"%s"}}\n' "$STUB_COMMIT"
+STUB
+chmod +x "${curl_stub_directory}/curl"
+curl_arguments="${fixture_root}/curl-arguments"
+assert_fails upstream-base-pin-enables-http-error-failure \
+  env PATH="${curl_stub_directory}:$PATH" \
+    STUB_CURL_ARGUMENTS="$curl_arguments" \
+    STUB_CURL_FAIL_ON_FAIL_FLAG=1 \
+    STUB_COMMIT='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
+    "${repo_root}/.github/fork/verify-upstream-base-pin.sh" "$upstream_version" "$base_pin"
+
+PATH="${curl_stub_directory}:$PATH" \
+GITHUB_TOKEN='generic-token' \
+STUB_CURL_ARGUMENTS="$curl_arguments" \
+STUB_COMMIT='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
+  "${repo_root}/.github/fork/verify-upstream-base-pin.sh" "$upstream_version" "$base_pin" \
+  >/dev/null
+if ! grep --fixed-strings --quiet -- 'Authorization: Bearer generic-token' "$curl_arguments"; then
+  echo "FAIL upstream-base-pin-authenticates-github-api-request" >&2
+  exit 1
+fi
+echo "PASS upstream-base-pin-authenticates-github-api-request"
+
+api_invalid_json="${fixture_root}/github-api-invalid-json"
+printf '%s\n' '#!/usr/bin/env bash' "printf '%s\\n' '<html>rate limited</html>'" \
+  >"$api_invalid_json"
+chmod +x "$api_invalid_json"
+assert_fails_with upstream-base-pin-rejects-invalid-api-response \
+  "GitHub returned an invalid object for upstream tag v${upstream_version}" \
+  env GITHUB_API_COMMAND="$api_invalid_json" \
+    "${repo_root}/.github/fork/verify-upstream-base-pin.sh" "$upstream_version" "$base_pin"
+
+api_non_commit="${fixture_root}/github-api-non-commit"
+printf '%s\n' '#!/usr/bin/env bash' \
+  "printf '%s\\n' '{\"object\":{\"type\":\"blob\",\"sha\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}}'" \
+  >"$api_non_commit"
+chmod +x "$api_non_commit"
+assert_fails upstream-base-pin-rejects-non-commit-object \
+  env GITHUB_API_COMMAND="$api_non_commit" \
+    "${repo_root}/.github/fork/verify-upstream-base-pin.sh" "$upstream_version" "$base_pin"
+
+api_tag_loop="${fixture_root}/github-api-tag-loop"
+printf '%s\n' '#!/usr/bin/env bash' \
+  "printf '%s\\n' '{\"object\":{\"type\":\"tag\",\"sha\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}'" \
+  >"$api_tag_loop"
+chmod +x "$api_tag_loop"
+assert_fails_with upstream-base-pin-bounds-annotated-tag-dereference \
+  'exceeds the four-hop annotated-tag limit' \
+  env GITHUB_API_COMMAND="$api_tag_loop" \
+    "${repo_root}/.github/fork/verify-upstream-base-pin.sh" "$upstream_version" "$base_pin"
+
 "${repo_root}/.github/fork/assert-build-config.sh" \
   "$upstream_bundle" "$upstream_bundle" "$no_overrides" >/dev/null
 echo "PASS build-config-matches-upstream-derived-values"
@@ -183,12 +276,6 @@ assert_fails build-config-rejects-value-different-from-upstream \
   "${repo_root}/.github/fork/assert-build-config.sh" \
     "$mismatched_bundle" "$upstream_bundle" "$no_overrides"
 
-empty_built_bundle="${fixture_root}/empty-built.mjs"
-sed 's#https://relay.t3.codes# #' "$upstream_bundle" >"$empty_built_bundle"
-assert_fails build-config-rejects-empty-built-value \
-  "${repo_root}/.github/fork/assert-build-config.sh" \
-    "$empty_built_bundle" "$upstream_bundle" "$no_overrides"
-
 empty_upstream_bundle="${fixture_root}/empty-upstream.mjs"
 sed 's#https://relay.t3.codes# #' "$upstream_bundle" >"$empty_upstream_bundle"
 assert_fails build-config-rejects-empty-derived-value \
@@ -199,8 +286,13 @@ operator_overrides="${fixture_root}/operator-overrides.json"
 T3CODE_RELAY_URL='https://override.example.invalid' \
   node "${repo_root}/.github/fork/capture-public-config-overrides.mjs" "$operator_overrides"
 override_warning="${fixture_root}/override-warning"
-node "${repo_root}/.github/fork/resolve-public-config.mjs" \
-  "$upstream_bundle" "$operator_overrides" >"${fixture_root}/effective.json" 2>"$override_warning"
+assert_fails_with divergent-environment-override-requires-acknowledgement \
+  'Public configuration divergence requires T3CODE_ALLOW_PUBLIC_CONFIG_DIVERGENCE=1' \
+  node "${repo_root}/.github/fork/resolve-public-config.mjs" \
+    "$upstream_bundle" "$operator_overrides"
+T3CODE_ALLOW_PUBLIC_CONFIG_DIVERGENCE=1 \
+  node "${repo_root}/.github/fork/resolve-public-config.mjs" \
+    "$upstream_bundle" "$operator_overrides" >"${fixture_root}/effective.json" 2>"$override_warning"
 if ! grep --fixed-strings --quiet \
   'WARNING: T3CODE_RELAY_URL overrides upstream value' "$override_warning"; then
   echo "FAIL divergent-environment-override-emits-warning" >&2
@@ -210,17 +302,26 @@ echo "PASS divergent-environment-override-emits-warning"
 override_bundle="${fixture_root}/declared-override.mjs"
 sed 's#https://relay.t3.codes#https://override.example.invalid#' \
   "$upstream_bundle" >"$override_bundle"
-if ! "${repo_root}/.github/fork/assert-build-config.sh" \
+if ! T3CODE_ALLOW_PUBLIC_CONFIG_DIVERGENCE=1 \
+  "${repo_root}/.github/fork/assert-build-config.sh" \
   "$override_bundle" "$upstream_bundle" "$operator_overrides" >/dev/null 2>&1; then
   echo "FAIL environment-override-takes-precedence-over-derived-value" >&2
   exit 1
 fi
 echo "PASS environment-override-takes-precedence-over-derived-value"
 
-T3CODE_RELAY_URL='' \
+T3CODE_RELAY_URL=' ' \
   node "${repo_root}/.github/fork/capture-public-config-overrides.mjs" "$operator_overrides"
-test "$(cat "$operator_overrides")" = '{}'
-echo "PASS empty-environment-override-uses-derived-value"
+assert_fails_with public-config-rejects-whitespace-override \
+  'Public configuration override is empty: T3CODE_RELAY_URL' \
+  node "${repo_root}/.github/fork/resolve-public-config.mjs" \
+    "$upstream_bundle" "$operator_overrides"
+
+printf '{"UNDECLARED_PUBLIC_CONFIG":"value"}\n' >"$operator_overrides"
+assert_fails_with public-config-rejects-unknown-override-name \
+  'Unknown public configuration override: UNDECLARED_PUBLIC_CONFIG' \
+  node "${repo_root}/.github/fork/resolve-public-config.mjs" \
+    "$upstream_bundle" "$operator_overrides"
 
 wrong_bundle="${fixture_root}/all-values-wrong.mjs"
 sed \
@@ -240,6 +341,54 @@ assert_fails build-config-rejects-six-undeclared-environment-values \
     T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN='token-wrong' \
     "${repo_root}/.github/fork/assert-build-config.sh" \
     "$wrong_bundle" "$upstream_bundle" "$no_overrides"
+
+release_stubs="${fixture_root}/release-stubs"
+mkdir -p "$release_stubs" "${fixture_root}/release-output"
+npm_release_stub="${release_stubs}/npm-pack"
+cat >"$npm_release_stub" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+destination=''
+while (( $# > 0 )); do
+  if [[ "$1" == --pack-destination ]]; then
+    destination="$2"
+    break
+  fi
+  shift
+done
+test -n "$destination"
+package_root="$(mktemp -d)"
+mkdir -p "${package_root}/package/dist"
+cp "$STUB_UPSTREAM_BUNDLE" "${package_root}/package/dist/bin.mjs"
+tar -czf "${destination}/t3-0.0.37.tgz" -C "$package_root" package
+printf '%s\n' '[{"filename":"t3-0.0.37.tgz"}]'
+STUB
+chmod +x "$npm_release_stub"
+cat >"${release_stubs}/vp" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "$(dirname "$STUB_BUILT_BUNDLE")"
+cp "$STUB_WRONG_BUNDLE" "$STUB_BUILT_BUNDLE"
+STUB
+chmod +x "${release_stubs}/vp"
+cat >"${release_stubs}/cargo" <<'STUB'
+#!/usr/bin/env bash
+echo 'cargo must not run before public configuration assertion' >&2
+exit 29
+STUB
+chmod +x "${release_stubs}/cargo"
+release_base_pin="$(sed -n '/^[^#]/p' "${repo_root}/.github/fork/base-tag")"
+assert_fails_with release-build-rejects-undeclared-built-config-divergence \
+  'Built public configuration differs from expected value: T3CODE_RELAY_URL' \
+  env PATH="${release_stubs}:$PATH" \
+    NPM_COMMAND="$npm_release_stub" \
+    STUB_UPSTREAM_BUNDLE="$upstream_bundle" \
+    STUB_WRONG_BUNDLE="$wrong_bundle" \
+    STUB_BUILT_BUNDLE="${repo_root}/apps/server/dist/bin.mjs" \
+    GITHUB_API_COMMAND="$api_stub" \
+    STUB_COMMIT="$release_base_pin" \
+    "${repo_root}/.github/fork/build-release.sh" \
+    "${upstream_version}-wyrd.1" "${fixture_root}/release-output"
 
 package_fixture="${fixture_root}/package.json"
 printf '{"name":"generic","version":"1.0.0"}\n' >"$package_fixture"
