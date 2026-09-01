@@ -49,9 +49,7 @@ done < <(
 )
 for ((index = 0; index < ${#config_fields[@]}; index += 2)); do
   name="${config_fields[index]}"
-  if [[ ! -v "$name" ]]; then
-    declare -gx "$name=${config_fields[index + 1]}"
-  fi
+  declare -gx "$name=${config_fields[index + 1]}"
 done
 
 vp run --filter t3 build
