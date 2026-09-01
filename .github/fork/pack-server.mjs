@@ -7,7 +7,6 @@
 //     - scripts/lib/brand-assets.ts
 //   used_by: .github/fork/build-release.sh
 // ---
-import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -19,6 +18,8 @@ import {
   resolveWebIconOverrides,
 } from "../../scripts/lib/brand-assets.ts";
 import { resolveCatalogDependencies } from "../../scripts/lib/resolve-catalog.ts";
+import { bundleNodePty } from "./bundle-node-pty.mjs";
+import { packDirectory } from "./pack-directory.mjs";
 import { isForkVersion } from "./version.mjs";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -26,10 +27,10 @@ const repoRoot = path.resolve(scriptDirectory, "../..");
 const serverDirectory = path.join(repoRoot, "apps/server");
 const requireFromScripts = createRequire(path.join(repoRoot, "scripts/package.json"));
 const { parse: parseYaml } = requireFromScripts("yaml");
-const [version, outputDirectoryArgument] = process.argv.slice(2);
+const [version, outputDirectoryArgument, nodePtyPrebuildArgument] = process.argv.slice(2);
 
-if (!version || !outputDirectoryArgument) {
-  console.error("Usage: pack-server.mjs <fork-version> <output-directory>");
+if (!version || !outputDirectoryArgument || !nodePtyPrebuildArgument) {
+  console.error("Usage: pack-server.mjs <fork-version> <output-directory> <node-pty-prebuild>");
   process.exit(2);
 }
 
@@ -39,6 +40,7 @@ if (!isForkVersion(version)) {
 }
 
 const outputDirectory = path.resolve(outputDirectoryArgument);
+const nodePtyPrebuild = path.resolve(nodePtyPrebuildArgument);
 const stagingDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "t3-fork-package-"));
 
 try {
@@ -67,6 +69,7 @@ try {
     type: serverPackage.type,
     engines: serverPackage.engines,
     files: ["dist", "LICENSE"],
+    bundledDependencies: ["node-pty"],
     dependencies: resolveCatalogDependencies(
       serverPackage.dependencies,
       workspace.catalog ?? {},
@@ -87,6 +90,11 @@ try {
     path.join(stagingDirectory, "package.json"),
     `${JSON.stringify(packageJson, null, 2)}\n`,
   );
+  await bundleNodePty({
+    sourceDirectory: await fs.realpath(path.join(serverDirectory, "node_modules/node-pty")),
+    packageDirectory: stagingDirectory,
+    prebuildPath: nodePtyPrebuild,
+  });
 
   const brand = resolveWebAssetBrandForPackageVersion(version);
   for (const override of resolveWebIconOverrides(brand, "dist/client")) {
@@ -97,29 +105,16 @@ try {
   }
 
   await fs.mkdir(outputDirectory, { recursive: true });
-  const packed = spawnSync("npm", ["pack", "--json", "--pack-destination", outputDirectory], {
-    cwd: stagingDirectory,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "inherit"],
-  });
-
-  if (packed.status !== 0) {
-    process.exit(packed.status ?? 1);
-  }
-
-  const packResult = JSON.parse(packed.stdout);
-  if (!Array.isArray(packResult) || packResult.length !== 1 || !packResult[0]?.filename) {
-    throw new Error(`Unexpected npm pack result: ${packed.stdout}`);
-  }
+  const packedPath = packDirectory(stagingDirectory, outputDirectory);
 
   const expectedFilename = `t3-${version}.tgz`;
-  if (packResult[0].filename !== expectedFilename) {
+  if (path.basename(packedPath) !== expectedFilename) {
     throw new Error(
-      `Packed filename '${packResult[0].filename}' does not match '${expectedFilename}'.`,
+      `Packed filename '${path.basename(packedPath)}' does not match '${expectedFilename}'.`,
     );
   }
 
-  console.log(path.join(outputDirectory, expectedFilename));
+  console.log(packedPath);
 } finally {
   await fs.rm(stagingDirectory, { recursive: true, force: true });
 }
