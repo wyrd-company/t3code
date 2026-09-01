@@ -1,0 +1,59 @@
+# ---
+# relationships:
+#   verifies: mcp-external-registration
+#   uses:
+#     - .github/fork/check-allowlist.sh
+#     - .github/fork/test.sh
+# ---
+name: Fork server CI
+
+on:
+  push:
+    branches:
+      - mcp-external-registration
+  pull_request:
+    branches:
+      - mcp-external-registration
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-server-ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    name: Verify server fork
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check fork boundary
+        run: .github/fork/check-allowlist.sh
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Test fork tooling
+        run: .github/fork/test.sh
+
+      - name: Check
+        run: vp check
+
+      - name: Typecheck
+        run: vpr typecheck
+
+      - name: Test server
+        run: vp run --filter t3 test
+
+      - name: Build server
+        run: vp run --filter t3 build

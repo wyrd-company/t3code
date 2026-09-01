@@ -1,0 +1,120 @@
+# ---
+# relationships:
+#   publishes: apps/server
+#   uses:
+#     - .github/fork/check-allowlist.sh
+#     - .github/fork/release-version.mjs
+#     - .github/fork/build-release.sh
+# ---
+name: Fork server release
+
+on:
+  push:
+    tags:
+      - server/*-wyrd.*
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fork-server-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish server tarball
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      T3CODE_RELAY_URL: ${{ vars.T3CODE_RELAY_URL }}
+      T3CODE_CLERK_PUBLISHABLE_KEY: ${{ vars.T3CODE_CLERK_PUBLISHABLE_KEY }}
+      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release version
+        id: release
+        run: |
+          version="$(.github/fork/release-version.mjs "$GITHUB_REF_NAME")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "asset=t3-${version}.tgz" >> "$GITHUB_OUTPUT"
+
+      - name: Check fork boundary
+        run: .github/fork/check-allowlist.sh
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Build release tarball
+        run: |
+          .github/fork/build-release.sh \
+            "${{ steps.release.outputs.version }}" \
+            "$RUNNER_TEMP/release-assets"
+
+      - name: Verify clean local install
+        env:
+          ASSET_NAME: ${{ steps.release.outputs.asset }}
+          EXPECTED_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          docker run --rm \
+            --env ASSET_NAME \
+            --env EXPECTED_VERSION \
+            --volume "$RUNNER_TEMP/release-assets:/release:ro" \
+            node:24-bookworm-slim \
+            sh -ceu '
+              npm install --global "/release/$ASSET_NAME"
+              test "$(t3 --version)" = "$EXPECTED_VERSION"
+            '
+
+      - name: Publish GitHub Release
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET_NAME: ${{ steps.release.outputs.asset }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "$RUNNER_TEMP/release-assets/$ASSET_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --latest=false \
+            --title "T3 Code Server $VERSION" \
+            --notes "Linux x64 server package for the Wyrd Company T3 Code fork."
+
+      - name: Verify anonymous release install
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET_NAME: ${{ steps.release.outputs.asset }}
+          EXPECTED_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          asset_url="$(
+            gh release view "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json assets \
+              --jq ".assets[] | select(.name == \"$ASSET_NAME\") | .url"
+          )"
+          test -n "$asset_url"
+          docker run --rm \
+            --env ASSET_URL="$asset_url" \
+            --env EXPECTED_VERSION \
+            node:24-bookworm-slim \
+            sh -ceu '
+              npm install --global "$ASSET_URL"
+              test "$(t3 --version)" = "$EXPECTED_VERSION"
+            '
+
+      - name: Remove failed release
+        if: failure() && steps.publish.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --yes

@@ -19,6 +19,7 @@ import {
   resolveWebIconOverrides,
 } from "../../scripts/lib/brand-assets.ts";
 import { resolveCatalogDependencies } from "../../scripts/lib/resolve-catalog.ts";
+import { isForkVersion } from "./version.mjs";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDirectory, "../..");
@@ -32,7 +33,7 @@ if (!version || !outputDirectoryArgument) {
   process.exit(2);
 }
 
-if (!/^\d+\.\d+\.\d+-wyrd\.\d+$/.test(version)) {
+if (!isForkVersion(version)) {
   console.error(`Fork version must match <semver>-wyrd.<number>: ${version}`);
   process.exit(1);
 }
@@ -44,8 +45,14 @@ try {
   const serverPackage = JSON.parse(
     await fs.readFile(path.join(serverDirectory, "package.json"), "utf8"),
   );
-  const workspace = parseYaml(await fs.readFile(path.join(repoRoot, "pnpm-workspace.yaml"), "utf8"));
-  const requiredBuildAssets = ["dist/bin.mjs", "dist/service-launcher.mjs", "dist/client/index.html"];
+  const workspace = parseYaml(
+    await fs.readFile(path.join(repoRoot, "pnpm-workspace.yaml"), "utf8"),
+  );
+  const requiredBuildAssets = [
+    "dist/bin.mjs",
+    "dist/service-launcher.mjs",
+    "dist/client/index.html",
+  ];
 
   for (const relativePath of requiredBuildAssets) {
     await fs.access(path.join(serverDirectory, relativePath));
@@ -90,11 +97,11 @@ try {
   }
 
   await fs.mkdir(outputDirectory, { recursive: true });
-  const packed = spawnSync(
-    "npm",
-    ["pack", "--json", "--pack-destination", outputDirectory],
-    { cwd: stagingDirectory, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
-  );
+  const packed = spawnSync("npm", ["pack", "--json", "--pack-destination", outputDirectory], {
+    cwd: stagingDirectory,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "inherit"],
+  });
 
   if (packed.status !== 0) {
     process.exit(packed.status ?? 1);
