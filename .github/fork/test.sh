@@ -467,6 +467,17 @@ echo 'cargo must not run before public configuration assertion' >&2
 exit 29
 STUB
 chmod +x "${release_stubs}/cargo"
+cat >"${release_stubs}/cp" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+destination="${*: -1}"
+if [[ "${STUB_SKIP_PACKAGE_RESTORE:-}" == 1 && \
+  "$destination" == */apps/server/package.json && "$1" == /tmp/*/package.json ]]; then
+  exit 0
+fi
+exec /bin/cp "$@"
+STUB
+chmod +x "${release_stubs}/cp"
 cat >"${release_repo}/.github/fork/build-node-pty.sh" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -597,6 +608,22 @@ if [[ "$(node -p "require('${release_repo}/apps/server/package.json').version")"
 fi
 echo "PASS release-build-completes-success-path"
 echo "PASS release-build-restores-package-after-success"
+
+assert_fails_with release-build-detects-package-restore-failure \
+  'Build did not restore apps/server/package.json.' \
+  env PATH="${release_stubs}:$PATH" \
+    NPM_COMMAND="$npm_release_stub" \
+    STUB_UPSTREAM_BUNDLE="$upstream_bundle" \
+    STUB_WRONG_BUNDLE="$wrong_bundle" \
+    STUB_RELEASE_REPO="$release_repo" \
+    STUB_CARGO_SUCCEED=1 \
+    STUB_SKIP_PACKAGE_RESTORE=1 \
+    GITHUB_API_COMMAND="$api_stub" \
+    STUB_COMMIT="$release_base_pin" \
+    "${release_stubs}/run-release" \
+    "${upstream_version}-wyrd.1" "${fixture_root}/release-output"
+git -C "$release_repo" show HEAD:apps/server/package.json \
+  >"${release_repo}/apps/server/package.json"
 
 package_fixture="${fixture_root}/package.json"
 printf '{"name":"generic","version":"1.0.0"}\n' >"$package_fixture"
