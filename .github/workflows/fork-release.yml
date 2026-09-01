@@ -60,6 +60,8 @@ jobs:
           run-install: true
 
       - name: Build release tarball
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           .github/fork/build-release.sh \
             "${{ steps.release.outputs.version }}" \
