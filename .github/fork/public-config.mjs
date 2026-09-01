@@ -81,14 +81,18 @@ function extractPackage(version, bundleOutput) {
   );
   try {
     const result = NodeChildProcess.spawnSync(
-      "npm",
-      ["pack", `t3@${version}`, "--pack-destination", temporaryDirectory, "--silent"],
+      NodeProcess.env.NPM_COMMAND ?? "npm",
+      ["pack", `t3@${version}`, "--pack-destination", temporaryDirectory, "--json"],
       { encoding: "utf8" },
     );
     if (result.status !== 0) {
       throw new Error(`Failed to fetch t3@${version}: ${result.stderr.trim()}`);
     }
-    const tarball = NodePath.join(temporaryDirectory, result.stdout.trim().split(/\r?\n/).at(-1));
+    const packResult = JSON.parse(result.stdout);
+    if (!Array.isArray(packResult) || packResult.length !== 1 || !packResult[0]?.filename) {
+      throw new Error(`Unexpected npm pack response for t3@${version}`);
+    }
+    const tarball = NodePath.join(temporaryDirectory, packResult[0].filename);
     const unpack = NodeChildProcess.spawnSync("tar", ["-xzf", tarball, "-C", temporaryDirectory], {
       encoding: "utf8",
     });
@@ -119,7 +123,12 @@ function main() {
   const [sourceKind, sourceValue, ...options] = NodeProcess.argv.slice(2);
   const formatIndex = options.indexOf("--format");
   const bundleOutputIndex = options.indexOf("--bundle-output");
-  const useOverrides = options.includes("--overrides");
+  if (formatIndex !== -1 && !options[formatIndex + 1]) {
+    throw new Error("Missing value for --format");
+  }
+  if (bundleOutputIndex !== -1 && !options[bundleOutputIndex + 1]) {
+    throw new Error("Missing value for --bundle-output");
+  }
   const format = formatIndex === -1 ? "json" : options[formatIndex + 1];
   const bundleOutput = bundleOutputIndex === -1 ? undefined : options[bundleOutputIndex + 1];
   if (!sourceValue || !["bundle", "package"].includes(sourceKind)) {
@@ -127,18 +136,10 @@ function main() {
       "Usage: public-config.mjs <bundle path|package version> [--format json|env0] [--bundle-output path]",
     );
   }
-  const derivedConfig =
+  const config =
     sourceKind === "bundle"
       ? extractPublicConfig(NodeFS.readFileSync(sourceValue, "utf8"))
       : extractPackage(sourceValue, bundleOutput);
-  const config = useOverrides
-    ? Object.fromEntries(
-        PUBLIC_CONFIG_NAMES.map((name) => [
-          name,
-          NodeProcess.env[name] ? NodeProcess.env[name] : derivedConfig[name],
-        ]),
-      )
-    : derivedConfig;
   emit(config, format);
 }
 
