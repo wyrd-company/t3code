@@ -73,7 +73,7 @@ jobs:
             node:24-bookworm-slim \
             sh -ceu '
               npm install --global "/release/$ASSET_NAME"
-              test "$(t3 --version)" = "$EXPECTED_VERSION"
+              test "$(t3 --version)" = "t3 v$EXPECTED_VERSION"
             '
 
       - name: Publish GitHub Release
@@ -110,7 +110,7 @@ jobs:
             node:24-bookworm-slim \
             sh -ceu '
               npm install --global "$ASSET_URL"
-              test "$(t3 --version)" = "$EXPECTED_VERSION"
+              test "$(t3 --version)" = "t3 v$EXPECTED_VERSION"
             '
 
       - name: Remove failed release
