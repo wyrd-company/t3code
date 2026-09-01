@@ -59,6 +59,11 @@ for (const [name, command] of [
 }
 NodeAssert.equal(findStep(ciSteps, "Check fork boundary").run, ".github/fork/check-allowlist.sh");
 NodeAssert.match(findStep(ciSteps, "Verify upstream base pin").run, /verify-upstream-base-pin\.sh/);
+NodeAssert.match(findStep(ciSteps, "Verify upstream base pin").run, /read-upstream-version\.sh/);
+NodeAssert.match(
+  findStep(ciSteps, "Verify upstream base pin").run,
+  /\.github\/fork\/upstream-version/,
+);
 NodeAssert.equal(
   findStep(ciSteps, "Verify upstream base pin").env.GITHUB_TOKEN,
   "${{ github.token }}",
