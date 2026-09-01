@@ -125,3 +125,33 @@ NodeAssert.match(
 );
 
 console.log("PASS fork-workflows-match-trigger-build-and-release-contracts");
+
+// The packer spawns the repository package manager by bare command name, so
+// every fork workflow that reaches it must install that command beforehand.
+const packerSource = NodeFS.readFileSync(
+  NodePath.join(repoRoot, ".github/fork/pack-directory.mjs"),
+  "utf8",
+);
+const spawnedPackageManager = packerSource.match(/spawnSync\(\s*"([^"]+)"/)?.[1];
+NodeAssert.equal(spawnedPackageManager, "pnpm");
+
+function assertPackageManagerPrecedes(steps, consumerName) {
+  const consumerIndex = steps.findIndex((step) => step.name === consumerName);
+  NodeAssert.ok(consumerIndex >= 0, `Missing workflow step: ${consumerName}`);
+  const providerIndex = steps.findIndex(
+    (step) => typeof step.uses === "string" && step.uses.startsWith("pnpm/action-setup@"),
+  );
+  NodeAssert.ok(
+    providerIndex >= 0,
+    `No step installs ${spawnedPackageManager} before ${consumerName}`,
+  );
+  NodeAssert.ok(
+    providerIndex < consumerIndex,
+    `${spawnedPackageManager} must be installed before ${consumerName}`,
+  );
+}
+
+assertPackageManagerPrecedes(ciSteps, "Test fork tooling");
+assertPackageManagerPrecedes(releaseSteps, "Build release tarball");
+
+console.log("PASS fork-workflows-install-packer-package-manager");
