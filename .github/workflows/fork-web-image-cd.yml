@@ -20,8 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
+      T3CODE_BASE_TAG: v0.0.37
       T3CODE_BASE_COMMIT: cefec32d6fc5d14f03e110ebdde534bdbcc9b62b
-      T3CODE_VERSION: 0.0.37
+      T3CODE_RELEASE_VERSION: 0.0.37-wyrd.1
     permissions:
       contents: read
       packages: write
@@ -35,7 +36,6 @@ jobs:
         id: release
         env:
           REF_NAME: ${{ github.ref_name }}
-          OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
           requested_tag="$REF_NAME"
@@ -44,8 +44,8 @@ jobs:
             exit 1
           fi
           tag="$requested_tag"
-          printf 'tag=%s\nversion=%s\nimage=ghcr.io/%s/t3code-web\ncreated=%s\n' \
-            "$tag" "${tag#web/}" "$OWNER" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          printf 'tag=%s\nversion=%s\nimage=ghcr.io/wyrd-company/t3code-web\ncreated=%s\n' \
+            "$tag" "${tag#web/}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         uses: actions/checkout@v6
@@ -59,15 +59,16 @@ jobs:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: |
           set -euo pipefail
-          if [ "$RELEASE_VERSION" != "$T3CODE_VERSION" ]; then
-            printf 'Release tag version %s does not match branch base version %s.\n' \
-              "$RELEASE_VERSION" "$T3CODE_VERSION" >&2
+          if [ "$RELEASE_VERSION" != "$T3CODE_RELEASE_VERSION" ]; then
+            printf 'Release tag version %s does not match fork release version %s.\n' \
+              "$RELEASE_VERSION" "$T3CODE_RELEASE_VERSION" >&2
             exit 1
           fi
 
           git fetch origin refs/heads/web-image:refs/remotes/origin/web-image
           git merge-base --is-ancestor HEAD refs/remotes/origin/web-image
           git cat-file -e "${T3CODE_BASE_COMMIT}^{commit}"
+          test "$(git rev-parse "${T3CODE_BASE_TAG}^{commit}")" = "$T3CODE_BASE_COMMIT"
 
           violations="$(
             git diff --name-status "${T3CODE_BASE_COMMIT}...HEAD" |
@@ -78,8 +79,9 @@ jobs:
             exit 1
           fi
 
-          grep --fixed-strings --quiet "v${T3CODE_VERSION}" docker/t3code-web/README.md
+          grep --fixed-strings --quiet "$T3CODE_BASE_TAG" docker/t3code-web/README.md
           grep --fixed-strings --quiet "$T3CODE_BASE_COMMIT" docker/t3code-web/README.md
+          grep --fixed-strings --quiet "web/${T3CODE_RELEASE_VERSION}" docker/t3code-web/README.md
           workspace_vite_plus="$(awk '$1 == "vite-plus:" { print $2; exit }' pnpm-workspace.yaml)"
           docker_vite_plus="$(sed -n 's/^ARG VITE_PLUS_VERSION=//p' docker/t3code-web/Dockerfile)"
           test -n "$workspace_vite_plus"
@@ -130,27 +132,25 @@ jobs:
           subject-digest: ${{ steps.publish.outputs.digest }}
           push-to-registry: true
 
-      - name: Make image public
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OWNER: ${{ github.repository_owner }}
-        run: |
-          gh api \
-            --method PATCH \
-            --header 'Accept: application/vnd.github+json' \
-            "/orgs/${OWNER}/packages/container/t3code-web" \
-            -f visibility=public
-
   anonymous-arm64-smoke:
     needs: publish
     runs-on: ubuntu-latest
     permissions: {}
     steps:
+      - name: Prepare anonymous Docker configuration
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/anonymous-docker-config
+        run: |
+          set -euo pipefail
+          mkdir -p "$DOCKER_CONFIG"
+          printf '{"auths":{}}\n' > "$DOCKER_CONFIG/config.json"
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
       - name: Verify anonymous arm64 pull and runtime
         env:
+          DOCKER_CONFIG: ${{ runner.temp }}/anonymous-docker-config
           IMAGE: ${{ needs.publish.outputs.image }}:${{ needs.publish.outputs.version }}
           T3CODE_VERSION: ${{ needs.publish.outputs.version }}
         run: |
