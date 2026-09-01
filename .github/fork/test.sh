@@ -69,11 +69,25 @@ T3CODE_CLERK_CLI_OAUTH_CLIENT_ID='oauth-client-generic' \
   "${repo_root}/.github/fork/assert-build-config.sh" "$bundle" >/dev/null
 echo "PASS build-config-accepts-populated-bundle"
 
-assert_fails build-config-rejects-empty-value \
-  env T3CODE_RELAY_URL='' \
+for missing_variable in \
+  T3CODE_RELAY_URL \
+  T3CODE_CLERK_PUBLISHABLE_KEY \
+  T3CODE_CLERK_CLI_OAUTH_CLIENT_ID; do
+  assert_fails "build-config-rejects-empty-${missing_variable}" \
+    env T3CODE_RELAY_URL='https://relay.example.invalid' \
+      T3CODE_CLERK_PUBLISHABLE_KEY='pk_test_generic' \
+      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID='oauth-client-generic' \
+      "${missing_variable}=" \
+      "${repo_root}/.github/fork/assert-build-config.sh" "$bundle"
+done
+
+missing_bundle_value="${fixture_root}/bin-missing-oauth.mjs"
+printf '%s\n' 'https://relay.example.invalid' 'pk_test_generic' >"$missing_bundle_value"
+assert_fails build-config-rejects-value-missing-from-bundle \
+  env T3CODE_RELAY_URL='https://relay.example.invalid' \
     T3CODE_CLERK_PUBLISHABLE_KEY='pk_test_generic' \
     T3CODE_CLERK_CLI_OAUTH_CLIENT_ID='oauth-client-generic' \
-    "${repo_root}/.github/fork/assert-build-config.sh" "$bundle"
+    "${repo_root}/.github/fork/assert-build-config.sh" "$missing_bundle_value"
 
 package_fixture="${fixture_root}/package.json"
 printf '{"name":"generic","version":"1.0.0"}\n' >"$package_fixture"

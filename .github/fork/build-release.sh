@@ -7,6 +7,7 @@
 #     - .github/fork/assert-build-config.sh
 #     - .github/fork/build-node-pty.sh
 #     - .github/fork/pack-server.mjs
+#     - .github/fork/verify-release-package.mjs
 #   used_by: .github/workflows/fork-release.yml
 # ---
 set -euo pipefail
@@ -45,8 +46,11 @@ install -m 0755 \
   "${monitor_target}/t3-resource-monitor"
 
 "${repo_root}/.github/fork/build-node-pty.sh" "$node_pty_prebuild"
-node "${repo_root}/.github/fork/pack-server.mjs" \
-  "$version" "$output_directory" "$node_pty_prebuild"
+tarball="$(
+  node "${repo_root}/.github/fork/pack-server.mjs" \
+    "$version" "$output_directory" "$node_pty_prebuild"
+)"
+node "${repo_root}/.github/fork/verify-release-package.mjs" "$tarball" "$version"
 
 cleanup
 trap - EXIT
