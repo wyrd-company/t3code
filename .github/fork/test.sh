@@ -52,6 +52,7 @@ git -C "$allowlist_repo" commit --quiet -m allowed
 )
 echo "PASS allowlist-accepts-reachable-commit-without-tag-ref"
 
+git -C "$allowlist_repo" tag v0.0.37 "$base_commit"
 printf 'v0.0.37\n' >"${allowlist_repo}/.github/fork/tag-base-pin"
 # $1 belongs to the nested shell.
 # shellcheck disable=SC2016
