@@ -33,7 +33,7 @@ node_pty_prebuild="${work_directory}/pty.node"
 upstream_bundle="${work_directory}/upstream-bin.mjs"
 operator_overrides="${work_directory}/operator-overrides.json"
 effective_config="${work_directory}/effective.env0"
-built_bundle="${T3CODE_BUILT_BUNDLE_PATH:-${repo_root}/apps/server/dist/bin.mjs}"
+built_bundle="${repo_root}/apps/server/dist/bin.mjs"
 package_changed=false
 
 cleanup() {
@@ -89,8 +89,3 @@ node "${repo_root}/.github/fork/verify-release-package.mjs" "$tarball" "$version
 cleanup
 package_changed=false
 trap - EXIT
-
-if ! git diff --quiet -- apps/server/package.json; then
-  echo "Build did not restore apps/server/package.json." >&2
-  exit 1
-fi

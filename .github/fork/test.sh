@@ -211,7 +211,7 @@ cat >"${curl_stub_directory}/curl" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >"$STUB_CURL_ARGUMENTS"
-if [[ ! -t 0 ]]; then cat >>"$STUB_CURL_ARGUMENTS"; fi
+if [[ "${STUB_EXPECT_STDIN:-}" == 1 ]]; then cat >"$STUB_CURL_STDIN"; fi
 if [[ " $* " == *' --fail '* && "${STUB_CURL_FAIL_ON_FAIL_FLAG:-}" == 1 ]]; then
   exit 22
 fi
@@ -219,6 +219,7 @@ printf '{"object":{"type":"commit","sha":"%s"}}\n' "$STUB_COMMIT"
 STUB
 chmod +x "${curl_stub_directory}/curl"
 curl_arguments="${fixture_root}/curl-arguments"
+curl_stdin="${fixture_root}/curl-stdin"
 assert_fails upstream-base-pin-wires-curl-fail-option \
   env PATH="${curl_stub_directory}:$PATH" \
     STUB_CURL_ARGUMENTS="$curl_arguments" \
@@ -229,10 +230,13 @@ assert_fails upstream-base-pin-wires-curl-fail-option \
 PATH="${curl_stub_directory}:$PATH" \
 GITHUB_TOKEN='generic-token' \
 STUB_CURL_ARGUMENTS="$curl_arguments" \
+STUB_CURL_STDIN="$curl_stdin" \
+STUB_EXPECT_STDIN=1 \
 STUB_COMMIT='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
   "${repo_root}/.github/fork/verify-upstream-base-pin.sh" "$upstream_version" "$base_pin" \
   >/dev/null
-if ! grep --fixed-strings --quiet -- 'Authorization: Bearer generic-token' "$curl_arguments"; then
+if grep --fixed-strings --quiet -- 'generic-token' "$curl_arguments" || \
+  ! grep --fixed-strings --quiet -- 'Authorization: Bearer generic-token' "$curl_stdin"; then
   echo "FAIL upstream-base-pin-authenticates-github-api-request" >&2
   exit 1
 fi
@@ -357,7 +361,27 @@ assert_fails build-config-rejects-six-undeclared-environment-values \
     "$wrong_bundle" "$upstream_bundle" "$no_overrides"
 
 release_stubs="${fixture_root}/release-stubs"
-mkdir -p "$release_stubs" "${fixture_root}/release-output"
+release_repo="${fixture_root}/release-repo"
+mkdir -p "$release_stubs" "${fixture_root}/release-output" \
+  "${release_repo}/.github" "${release_repo}/apps/server"
+cp -R "${repo_root}/.github/fork" "${release_repo}/.github/fork"
+printf '{"name":"generic","version":"0.0.36"}\n' \
+  >"${release_repo}/apps/server/package.json"
+git -C "$release_repo" init --quiet
+git -C "$release_repo" config user.name "Release Orchestration Test"
+git -C "$release_repo" config user.email "release-orchestration@example.invalid"
+git -C "$release_repo" add .github apps/server/package.json
+git -C "$release_repo" commit --quiet -m fixture
+
+assert_release_case_fails_with() {
+  local test_name="$1"
+  shift
+  assert_fails_with "$test_name" "$@"
+  if ! git -C "$release_repo" diff --quiet -- apps/server/package.json; then
+    echo "FAIL release-build-restores-package-after-failure" >&2
+    return 1
+  fi
+}
 npm_release_stub="${release_stubs}/npm-pack"
 cat >"$npm_release_stub" <<'STUB'
 #!/usr/bin/env bash
@@ -381,12 +405,14 @@ chmod +x "$npm_release_stub"
 cat >"${release_stubs}/vp" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
-mkdir -p "$(dirname "$STUB_BUILT_BUNDLE")"
+repo_root="$(git rev-parse --show-toplevel)"
+built_bundle="${repo_root}/apps/server/dist/bin.mjs"
+mkdir -p "$(dirname "$built_bundle")"
 if [[ "${STUB_FORCE_WRONG_BUNDLE:-}" == 1 ]]; then
-  cp "$STUB_WRONG_BUNDLE" "$STUB_BUILT_BUNDLE"
+  cp "$STUB_WRONG_BUNDLE" "$built_bundle"
   exit
 fi
-node - "$STUB_UPSTREAM_BUNDLE" "$STUB_BUILT_BUNDLE" <<'NODE'
+node - "$STUB_UPSTREAM_BUNDLE" "$built_bundle" <<'NODE'
 const fs = require("node:fs");
 const [sourcePath, outputPath] = process.argv.slice(2);
 const replacements = [
@@ -411,76 +437,90 @@ echo 'cargo must not run before public configuration assertion' >&2
 exit 29
 STUB
 chmod +x "${release_stubs}/cargo"
+cat >"${release_stubs}/run-release" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$STUB_RELEASE_REPO"
+exec .github/fork/build-release.sh "$@"
+STUB
+chmod +x "${release_stubs}/run-release"
 release_base_pin="$(sed -n '/^[^#]/p' "${repo_root}/.github/fork/base-tag")"
-release_built_bundle="${fixture_root}/release-built.mjs"
+release_built_bundle="${release_repo}/apps/server/dist/bin.mjs"
+mkdir -p "$(dirname "$release_built_bundle")"
 cp "$wrong_bundle" "$release_built_bundle"
-assert_fails_with release-build-exports-derived-config-to-build-environment \
+assert_release_case_fails_with release-build-exports-derived-config-to-build-environment \
   'cargo must not run before public configuration assertion' \
   env PATH="${release_stubs}:$PATH" \
     NPM_COMMAND="$npm_release_stub" \
     STUB_UPSTREAM_BUNDLE="$upstream_bundle" \
     STUB_WRONG_BUNDLE="$wrong_bundle" \
-    STUB_BUILT_BUNDLE="$release_built_bundle" \
-    T3CODE_BUILT_BUNDLE_PATH="$release_built_bundle" \
+    STUB_RELEASE_REPO="$release_repo" \
     GITHUB_API_COMMAND="$api_stub" \
     STUB_COMMIT="$release_base_pin" \
-    "${repo_root}/.github/fork/build-release.sh" \
+    "${release_stubs}/run-release" \
     "${upstream_version}-wyrd.1" "${fixture_root}/release-output"
 
-assert_fails_with release-build-applies-acknowledged-operator-override \
+assert_release_case_fails_with release-build-applies-acknowledged-operator-override \
   'cargo must not run before public configuration assertion' \
   env PATH="${release_stubs}:$PATH" \
     NPM_COMMAND="$npm_release_stub" \
     STUB_UPSTREAM_BUNDLE="$upstream_bundle" \
     STUB_WRONG_BUNDLE="$wrong_bundle" \
-    STUB_BUILT_BUNDLE="$release_built_bundle" \
-    T3CODE_BUILT_BUNDLE_PATH="$release_built_bundle" \
+    STUB_RELEASE_REPO="$release_repo" \
     GITHUB_API_COMMAND="$api_stub" \
     STUB_COMMIT="$release_base_pin" \
     T3CODE_RELAY_URL='https://override.example.invalid' \
     T3CODE_ALLOW_PUBLIC_CONFIG_DIVERGENCE=1 \
-    "${repo_root}/.github/fork/build-release.sh" \
+    "${release_stubs}/run-release" \
     "${upstream_version}-wyrd.1" "${fixture_root}/release-output"
+override_built_json="$(
+  node "${repo_root}/.github/fork/public-config.mjs" bundle "$release_built_bundle"
+)"
+if ! node -e \
+  'const value=JSON.parse(process.argv[1]); if (value.T3CODE_RELAY_URL !== process.argv[2]) process.exit(1)' \
+  "$override_built_json" 'https://override.example.invalid'; then
+  echo "FAIL release-build-uses-captured-operator-overrides" >&2
+  exit 1
+fi
+echo "PASS release-build-uses-captured-operator-overrides"
 
-assert_fails_with release-build-rejects-undeclared-built-config-divergence \
+assert_release_case_fails_with release-build-rejects-undeclared-built-config-divergence \
   'Built public configuration differs from expected value: T3CODE_RELAY_URL' \
   env PATH="${release_stubs}:$PATH" \
     NPM_COMMAND="$npm_release_stub" \
     STUB_UPSTREAM_BUNDLE="$upstream_bundle" \
     STUB_WRONG_BUNDLE="$wrong_bundle" \
     STUB_FORCE_WRONG_BUNDLE=1 \
-    STUB_BUILT_BUNDLE="$release_built_bundle" \
-    T3CODE_BUILT_BUNDLE_PATH="$release_built_bundle" \
+    STUB_RELEASE_REPO="$release_repo" \
     GITHUB_API_COMMAND="$api_stub" \
     STUB_COMMIT="$release_base_pin" \
-    "${repo_root}/.github/fork/build-release.sh" \
+    "${release_stubs}/run-release" \
     "${upstream_version}-wyrd.1" "${fixture_root}/release-output"
 
-assert_fails_with release-build-rejects-version-mismatched-with-upstream \
+assert_release_case_fails_with release-build-rejects-version-mismatched-with-upstream \
   'Release base version 0.0.36 does not match upstream version' \
   env PATH="${release_stubs}:$PATH" \
     NPM_COMMAND="$npm_release_stub" \
     STUB_UPSTREAM_BUNDLE="$upstream_bundle" \
     STUB_WRONG_BUNDLE="$wrong_bundle" \
-    STUB_BUILT_BUNDLE="$release_built_bundle" \
-    T3CODE_BUILT_BUNDLE_PATH="$release_built_bundle" \
+    STUB_RELEASE_REPO="$release_repo" \
     GITHUB_API_COMMAND="$api_stub" \
     STUB_COMMIT="$release_base_pin" \
-    "${repo_root}/.github/fork/build-release.sh" \
+    "${release_stubs}/run-release" \
     '0.0.36-wyrd.1' "${fixture_root}/release-output"
 
-assert_fails_with release-build-rejects-upstream-tag-mismatched-with-base-pin \
+assert_release_case_fails_with release-build-rejects-upstream-tag-mismatched-with-base-pin \
   "not base pin ${release_base_pin}" \
   env PATH="${release_stubs}:$PATH" \
     NPM_COMMAND="$npm_release_stub" \
     STUB_UPSTREAM_BUNDLE="$upstream_bundle" \
     STUB_WRONG_BUNDLE="$wrong_bundle" \
-    STUB_BUILT_BUNDLE="$release_built_bundle" \
-    T3CODE_BUILT_BUNDLE_PATH="$release_built_bundle" \
+    STUB_RELEASE_REPO="$release_repo" \
     GITHUB_API_COMMAND="$api_stub" \
     STUB_COMMIT='dddddddddddddddddddddddddddddddddddddddd' \
-    "${repo_root}/.github/fork/build-release.sh" \
+    "${release_stubs}/run-release" \
     "${upstream_version}-wyrd.1" "${fixture_root}/release-output"
+echo "PASS release-build-restores-package-after-failure"
 
 package_fixture="${fixture_root}/package.json"
 printf '{"name":"generic","version":"1.0.0"}\n' >"$package_fixture"
