@@ -32,6 +32,7 @@ package_backup="${work_directory}/package.json"
 node_pty_prebuild="${work_directory}/pty.node"
 upstream_bundle="${work_directory}/upstream-bin.mjs"
 operator_overrides="${work_directory}/operator-overrides.json"
+effective_config="${work_directory}/effective.env0"
 package_changed=false
 
 cleanup() {
@@ -48,29 +49,20 @@ upstream_version="$("${repo_root}/.github/fork/read-upstream-version.sh" "${repo
   "$upstream_version" "${repo_root}/.github/fork/base-tag"
 
 node "${repo_root}/.github/fork/capture-public-config-overrides.mjs" "$operator_overrides"
-derived_json="$(
-  node "${repo_root}/.github/fork/public-config.mjs" package "$upstream_version" \
-    --bundle-output "$upstream_bundle"
-)"
-effective_json="$(
-  node "${repo_root}/.github/fork/resolve-public-config.mjs" \
-    "$upstream_bundle" "$operator_overrides"
-)"
+node "${repo_root}/.github/fork/public-config.mjs" package "$upstream_version" \
+  --bundle-output "$upstream_bundle" >/dev/null
+node "${repo_root}/.github/fork/resolve-public-config.mjs" \
+  "$upstream_bundle" "$operator_overrides" env0 >"$effective_config"
 
 config_fields=()
-while IFS= read -r field; do
+while IFS= read -r -d '' field; do
   config_fields+=("$field")
-done < <(node - "$effective_json" <<'NODE'
-const config = JSON.parse(process.argv[2]);
-for (const [name, value] of Object.entries(config)) console.log(`${name}\n${value}`);
-NODE
-)
+done <"$effective_config"
 for ((index = 0; index < ${#config_fields[@]}; index += 2)); do
   name="${config_fields[index]}"
   declare -gx "$name=${config_fields[index + 1]}"
 done
 
-test -n "$derived_json"
 cp "$package_json" "$package_backup"
 package_changed=true
 node "${repo_root}/.github/fork/set-package-version.mjs" "$package_json" "$version"

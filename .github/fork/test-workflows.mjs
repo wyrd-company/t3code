@@ -58,6 +58,11 @@ for (const [name, command] of [
   NodeAssert.equal(findStep(ciSteps, name).run, command);
 }
 NodeAssert.equal(findStep(ciSteps, "Check fork boundary").run, ".github/fork/check-allowlist.sh");
+NodeAssert.match(findStep(ciSteps, "Verify upstream base pin").run, /verify-upstream-base-pin\.sh/);
+NodeAssert.equal(
+  findStep(ciSteps, "Verify upstream base pin").env.GITHUB_TOKEN,
+  "${{ github.token }}",
+);
 NodeAssert.equal(findStep(ciSteps, "Test fork tooling").run, ".github/fork/test.sh");
 
 const release = readWorkflow("fork-release.yml");
@@ -83,6 +88,10 @@ for (const name of [
 ]) {
   NodeAssert.equal(releaseJob.env[name], `\${{ vars.${name} }}`);
 }
+NodeAssert.equal(
+  releaseJob.env.T3CODE_ALLOW_PUBLIC_CONFIG_DIVERGENCE,
+  "${{ vars.T3CODE_ALLOW_PUBLIC_CONFIG_DIVERGENCE }}",
+);
 
 const releaseSteps = stepsFor(release, "release");
 NodeAssert.equal(findStep(releaseSteps, "Checkout").with["fetch-depth"], 0);
