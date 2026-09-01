@@ -29,6 +29,17 @@ assert_fails() {
   echo "PASS ${test_name}"
 }
 
+assert_fails_with() {
+  local test_name="$1"
+  local expected="$2"
+  shift 2
+  assert_fails "$test_name" "$@"
+  if ! grep --fixed-strings --quiet -- "$expected" "${fixture_root}/${test_name}.out"; then
+    echo "FAIL ${test_name}: missing error: ${expected}" >&2
+    return 1
+  fi
+}
+
 allowlist_repo="${fixture_root}/allowlist"
 mkdir -p "${allowlist_repo}/.github/fork" "${allowlist_repo}/apps/server/src/mcp"
 git -C "$allowlist_repo" init --quiet
@@ -80,7 +91,8 @@ echo "PASS extractor-accepts-complete-bundle"
 
 missing_anchor_bundle="${fixture_root}/missing-anchor.mjs"
 sed '/const buildTimeClerkPublishableKey/d' "$upstream_bundle" >"$missing_anchor_bundle"
-assert_fails extractor-rejects-absent-anchor \
+assert_fails_with extractor-rejects-absent-anchor \
+  'Missing public configuration anchor: buildTimeClerkPublishableKey' \
   node "${repo_root}/.github/fork/public-config.mjs" bundle "$missing_anchor_bundle"
 
 duplicate_anchor_bundle="${fixture_root}/duplicate-anchor.mjs"
@@ -88,7 +100,8 @@ cp "$upstream_bundle" "$duplicate_anchor_bundle"
 printf '%s\n' \
   'const buildTimeClerkPublishableKey = readBuildTimeValue("pk_test_duplicate");' \
   >>"$duplicate_anchor_bundle"
-assert_fails extractor-rejects-duplicate-anchor \
+assert_fails_with extractor-rejects-duplicate-anchor \
+  'Duplicate public configuration anchor: buildTimeClerkPublishableKey' \
   node "${repo_root}/.github/fork/public-config.mjs" bundle "$duplicate_anchor_bundle"
 
 "${repo_root}/.github/fork/verify-base-version.sh" '0.0.37-wyrd.1' '0.0.37'
@@ -114,9 +127,12 @@ override_json="$({
   T3CODE_RELAY_URL='https://override.example.invalid' \
     node "${repo_root}/.github/fork/public-config.mjs" bundle "$upstream_bundle" --overrides
 })"
-node -e \
+if ! node -e \
   'const value = JSON.parse(process.argv[1]); if (value.T3CODE_RELAY_URL !== process.argv[2]) process.exit(1)' \
-  "$override_json" 'https://override.example.invalid'
+  "$override_json" 'https://override.example.invalid'; then
+  echo "FAIL environment-override-takes-precedence-over-derived-value" >&2
+  exit 1
+fi
 echo "PASS environment-override-takes-precedence-over-derived-value"
 
 package_fixture="${fixture_root}/package.json"
