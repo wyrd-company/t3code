@@ -2,6 +2,7 @@
 relationships:
   references:
     - .github/fork/base-tag
+    - .github/fork/upstream-version
     - .github/fork/allowlist.txt
     - LICENSE
 ---
@@ -48,6 +49,8 @@ Server tags use `server/<upstream-version>-wyrd.<release>`, for example `server/
 
 The build temporarily changes the package version in the runner worktree so that `t3 --version` reports the fork version. The build restores `apps/server/package.json` before publication; the fork carries no committed edit to that upstream file.
 
-The public client configuration was harvested from the upstream `t3@0.0.37` bundle. Store it as repository variables named `T3CODE_RELAY_URL`, `T3CODE_CLERK_PUBLISHABLE_KEY`, and `T3CODE_CLERK_CLI_OAUTH_CLIENT_ID`. The release job rejects empty values and verifies the built bundle contains each value. The OTLP traces token is a secret and is intentionally absent.
+The public client configuration is derived from the upstream package version in [.github/fork/upstream-version](.github/fork/upstream-version), which corresponds to the base pin. The release base version must match this record. The release build extracts the relay, Clerk, and relay client OTLP traces values from that exact public npm package and verifies the built bundle matches them. This deliberately reproduces upstream's complete telemetry configuration, including its public traces token.
+
+Repository variables named for any of the six public configuration values are optional overrides for deliberate divergence. A set variable takes precedence over the derived value. The built bundle must contain a non-empty value for every field and match the upstream package unless an override is supplied.
 
 The release tarball includes the upstream MIT [LICENSE](LICENSE) and keeps the package repository attribution to `pingdotgg/t3code`.
