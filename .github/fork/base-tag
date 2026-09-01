@@ -2,6 +2,8 @@
 # relationships:
 #   used_by:
 #     - .github/fork/check-allowlist.sh
+#     - .github/fork/build-release.sh
+#     - .github/fork/verify-upstream-base-pin.sh
 #     - FORK.md
 # ---
 cefec32d6fc5d14f03e110ebdde534bdbcc9b62b
