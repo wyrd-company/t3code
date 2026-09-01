@@ -5,17 +5,17 @@
 //     - .github/fork/test-packer.mjs
 // ---
 
-import fs from "node:fs/promises";
-import path from "node:path";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 
 export async function bundleNodePty({ sourceDirectory, packageDirectory, prebuildPath }) {
-  const targetDirectory = path.join(packageDirectory, "node_modules", "node-pty");
-  const targetPrebuild = path.join(targetDirectory, "prebuilds", "linux-x64", "pty.node");
+  const targetDirectory = NodePath.join(packageDirectory, "node_modules", "node-pty");
+  const targetPrebuild = NodePath.join(targetDirectory, "prebuilds", "linux-x64", "pty.node");
 
-  await fs.cp(sourceDirectory, targetDirectory, { recursive: true, dereference: true });
-  await fs.rm(path.join(targetDirectory, "build"), { recursive: true, force: true });
-  await fs.rm(path.dirname(targetPrebuild), { recursive: true, force: true });
-  await fs.mkdir(path.dirname(targetPrebuild), { recursive: true });
-  await fs.copyFile(prebuildPath, targetPrebuild);
-  await fs.chmod(targetPrebuild, 0o755);
+  await NodeFSP.cp(sourceDirectory, targetDirectory, { recursive: true, dereference: true });
+  await NodeFSP.rm(NodePath.join(targetDirectory, "build"), { recursive: true, force: true });
+  await NodeFSP.rm(NodePath.dirname(targetPrebuild), { recursive: true, force: true });
+  await NodeFSP.mkdir(NodePath.dirname(targetPrebuild), { recursive: true });
+  await NodeFSP.copyFile(prebuildPath, targetPrebuild);
+  await NodeFSP.chmod(targetPrebuild, 0o755);
 }

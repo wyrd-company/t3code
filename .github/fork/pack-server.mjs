@@ -7,11 +7,11 @@
 //     - scripts/lib/brand-assets.ts
 //   used_by: .github/fork/build-release.sh
 // ---
-import { createRequire } from "node:module";
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import * as NodeFSP from "node:fs/promises";
+import * as NodeModule from "node:module";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 
 import {
   resolveWebAssetBrandForPackageVersion,
@@ -22,10 +22,12 @@ import { bundleNodePty } from "./bundle-node-pty.mjs";
 import { packDirectory } from "./pack-directory.mjs";
 import { isForkVersion } from "./version.mjs";
 
-const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(scriptDirectory, "../..");
-const serverDirectory = path.join(repoRoot, "apps/server");
-const requireFromScripts = createRequire(path.join(repoRoot, "scripts/package.json"));
+const scriptDirectory = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
+const repoRoot = NodePath.resolve(scriptDirectory, "../..");
+const serverDirectory = NodePath.join(repoRoot, "apps/server");
+const requireFromScripts = NodeModule.createRequire(
+  NodePath.join(repoRoot, "scripts/package.json"),
+);
 const { parse: parseYaml } = requireFromScripts("yaml");
 const [version, outputDirectoryArgument, nodePtyPrebuildArgument] = process.argv.slice(2);
 
@@ -39,16 +41,16 @@ if (!isForkVersion(version)) {
   process.exit(1);
 }
 
-const outputDirectory = path.resolve(outputDirectoryArgument);
-const nodePtyPrebuild = path.resolve(nodePtyPrebuildArgument);
-const stagingDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "t3-fork-package-"));
+const outputDirectory = NodePath.resolve(outputDirectoryArgument);
+const nodePtyPrebuild = NodePath.resolve(nodePtyPrebuildArgument);
+const stagingDirectory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-fork-package-"));
 
 try {
   const serverPackage = JSON.parse(
-    await fs.readFile(path.join(serverDirectory, "package.json"), "utf8"),
+    await NodeFSP.readFile(NodePath.join(serverDirectory, "package.json"), "utf8"),
   );
   const workspace = parseYaml(
-    await fs.readFile(path.join(repoRoot, "pnpm-workspace.yaml"), "utf8"),
+    await NodeFSP.readFile(NodePath.join(repoRoot, "pnpm-workspace.yaml"), "utf8"),
   );
   const requiredBuildAssets = [
     "dist/bin.mjs",
@@ -57,7 +59,7 @@ try {
   ];
 
   for (const relativePath of requiredBuildAssets) {
-    await fs.access(path.join(serverDirectory, relativePath));
+    await NodeFSP.access(NodePath.join(serverDirectory, relativePath));
   }
 
   const packageJson = {
@@ -82,39 +84,48 @@ try {
     ),
   };
 
-  await fs.cp(path.join(serverDirectory, "dist"), path.join(stagingDirectory, "dist"), {
-    recursive: true,
-  });
-  await fs.copyFile(path.join(repoRoot, "LICENSE"), path.join(stagingDirectory, "LICENSE"));
-  await fs.writeFile(
-    path.join(stagingDirectory, "package.json"),
+  await NodeFSP.cp(
+    NodePath.join(serverDirectory, "dist"),
+    NodePath.join(stagingDirectory, "dist"),
+    {
+      recursive: true,
+    },
+  );
+  await NodeFSP.copyFile(
+    NodePath.join(repoRoot, "LICENSE"),
+    NodePath.join(stagingDirectory, "LICENSE"),
+  );
+  await NodeFSP.writeFile(
+    NodePath.join(stagingDirectory, "package.json"),
     `${JSON.stringify(packageJson, null, 2)}\n`,
   );
   await bundleNodePty({
-    sourceDirectory: await fs.realpath(path.join(serverDirectory, "node_modules/node-pty")),
+    sourceDirectory: await NodeFSP.realpath(
+      NodePath.join(serverDirectory, "node_modules/node-pty"),
+    ),
     packageDirectory: stagingDirectory,
     prebuildPath: nodePtyPrebuild,
   });
 
   const brand = resolveWebAssetBrandForPackageVersion(version);
   for (const override of resolveWebIconOverrides(brand, "dist/client")) {
-    await fs.copyFile(
-      path.join(repoRoot, override.sourceRelativePath),
-      path.join(stagingDirectory, override.targetRelativePath),
+    await NodeFSP.copyFile(
+      NodePath.join(repoRoot, override.sourceRelativePath),
+      NodePath.join(stagingDirectory, override.targetRelativePath),
     );
   }
 
-  await fs.mkdir(outputDirectory, { recursive: true });
+  await NodeFSP.mkdir(outputDirectory, { recursive: true });
   const packedPath = packDirectory(stagingDirectory, outputDirectory);
 
   const expectedFilename = `t3-${version}.tgz`;
-  if (path.basename(packedPath) !== expectedFilename) {
+  if (NodePath.basename(packedPath) !== expectedFilename) {
     throw new Error(
-      `Packed filename '${path.basename(packedPath)}' does not match '${expectedFilename}'.`,
+      `Packed filename '${NodePath.basename(packedPath)}' does not match '${expectedFilename}'.`,
     );
   }
 
   console.log(packedPath);
 } finally {
-  await fs.rm(stagingDirectory, { recursive: true, force: true });
+  await NodeFSP.rm(stagingDirectory, { recursive: true, force: true });
 }
