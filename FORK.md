@@ -27,6 +27,7 @@ new_base_commit="$(git rev-parse "refs/tags/${new_base_tag}^{commit}")"
 git switch mcp-external-registration
 git rebase "refs/tags/${new_base_tag}"
 printf '%s\n' "$new_base_commit" > .github/fork/base-tag
+printf '%s\n' "${new_base_tag#v}" > .github/fork/upstream-version
 .github/fork/check-allowlist.sh
 ```
 
