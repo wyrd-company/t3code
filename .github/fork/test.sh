@@ -206,8 +206,11 @@ grep --fixed-strings --quiet \
 override_bundle="${fixture_root}/declared-override.mjs"
 sed 's#https://relay.t3.codes#https://override.example.invalid#' \
   "$upstream_bundle" >"$override_bundle"
-"${repo_root}/.github/fork/assert-build-config.sh" \
-  "$override_bundle" "$upstream_bundle" "$operator_overrides" >/dev/null 2>&1
+if ! "${repo_root}/.github/fork/assert-build-config.sh" \
+  "$override_bundle" "$upstream_bundle" "$operator_overrides" >/dev/null 2>&1; then
+  echo "FAIL environment-override-takes-precedence-over-derived-value" >&2
+  exit 1
+fi
 echo "PASS environment-override-takes-precedence-over-derived-value"
 
 T3CODE_RELAY_URL='' \
