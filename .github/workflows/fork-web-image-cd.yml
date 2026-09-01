@@ -48,7 +48,7 @@ jobs:
             "$tag" "${tag#web/}" "$OWNER" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           ref: refs/tags/${{ steps.release.outputs.tag }}
           fetch-depth: 0
@@ -80,6 +80,10 @@ jobs:
 
           grep --fixed-strings --quiet "v${T3CODE_VERSION}" docker/t3code-web/README.md
           grep --fixed-strings --quiet "$T3CODE_BASE_COMMIT" docker/t3code-web/README.md
+          workspace_vite_plus="$(awk '$1 == "vite-plus:" { print $2; exit }' pnpm-workspace.yaml)"
+          docker_vite_plus="$(sed -n 's/^ARG VITE_PLUS_VERSION=//p' docker/t3code-web/Dockerfile)"
+          test -n "$workspace_vite_plus"
+          test "$docker_vite_plus" = "$workspace_vite_plus"
           if grep -E 'T3CODE_SOURCE_SHA256|t3code/archive|sha256sum' docker/t3code-web/Dockerfile; then
             echo 'Dockerfile must build the checked-out tree without a downloaded source archive.' >&2
             exit 1
