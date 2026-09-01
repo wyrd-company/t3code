@@ -21,6 +21,7 @@ if (!upstreamBundle || !overridesPath || !["json", "env0"].includes(format)) {
 
 const upstream = extractPublicConfig(NodeFS.readFileSync(upstreamBundle, "utf8"));
 const overrides = JSON.parse(NodeFS.readFileSync(overridesPath, "utf8"));
+const divergences = [];
 for (const [name, value] of Object.entries(upstream)) {
   if (value.trim() === "")
     throw new Error(`Upstream derived public configuration is empty: ${name}`);
@@ -32,10 +33,16 @@ for (const name of Object.keys(overrides)) {
     throw new Error(`Public configuration override is empty: ${name}`);
   }
   if (overrides[name] !== upstream[name]) {
+    divergences.push(name);
     NodeProcess.stderr.write(
       `WARNING: ${name} overrides upstream value ${JSON.stringify(upstream[name])} with ${JSON.stringify(overrides[name])}.\n`,
     );
   }
+}
+if (divergences.length > 0 && NodeProcess.env.T3CODE_ALLOW_PUBLIC_CONFIG_DIVERGENCE !== "1") {
+  throw new Error(
+    `Public configuration divergence requires T3CODE_ALLOW_PUBLIC_CONFIG_DIVERGENCE=1: ${divergences.join(", ")}`,
+  );
 }
 
 const effective = Object.fromEntries(
