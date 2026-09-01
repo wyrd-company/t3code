@@ -76,7 +76,13 @@ NodeAssert.equal(
   releaseJob.env.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID,
   "${{ vars.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID }}",
 );
-NodeAssert.equal("T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN" in releaseJob.env, false);
+for (const name of [
+  "T3CODE_RELAY_CLIENT_OTLP_TRACES_URL",
+  "T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET",
+  "T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN",
+]) {
+  NodeAssert.equal(releaseJob.env[name], `\${{ vars.${name} }}`);
+}
 
 const releaseSteps = stepsFor(release, "release");
 NodeAssert.equal(findStep(releaseSteps, "Checkout").with["fetch-depth"], 0);

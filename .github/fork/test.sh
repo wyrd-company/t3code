@@ -4,6 +4,8 @@
 #   verifies:
 #     - .github/fork/check-allowlist.sh
 #     - .github/fork/assert-build-config.sh
+#     - .github/fork/public-config.mjs
+#     - .github/fork/verify-base-version.sh
 #     - .github/fork/set-package-version.mjs
 #     - .github/fork/release-version.mjs
 #     - .github/fork/bundle-node-pty.mjs
@@ -72,33 +74,50 @@ assert_fails allowlist-rejects-upstream-edit \
     FORK_ALLOWLIST_FILE="${allowlist_repo}/.github/fork/allowlist.txt" \
     bash -c 'cd "$1" && .github/fork/check-allowlist.sh' _ "$allowlist_repo"
 
-bundle="${fixture_root}/bin.mjs"
-printf '%s\n' 'https://relay.example.invalid' 'pk_test_generic' 'oauth-client-generic' >"$bundle"
-T3CODE_RELAY_URL='https://relay.example.invalid' \
-T3CODE_CLERK_PUBLISHABLE_KEY='pk_test_generic' \
-T3CODE_CLERK_CLI_OAUTH_CLIENT_ID='oauth-client-generic' \
-  "${repo_root}/.github/fork/assert-build-config.sh" "$bundle" >/dev/null
-echo "PASS build-config-accepts-populated-bundle"
+upstream_bundle="${repo_root}/.github/fork/fixtures/upstream-public-config.mjs"
+node "${repo_root}/.github/fork/public-config.mjs" bundle "$upstream_bundle" >/dev/null
+echo "PASS extractor-accepts-complete-bundle"
 
-for missing_variable in \
-  T3CODE_RELAY_URL \
-  T3CODE_CLERK_PUBLISHABLE_KEY \
-  T3CODE_CLERK_CLI_OAUTH_CLIENT_ID; do
-  assert_fails "build-config-rejects-empty-${missing_variable}" \
-    env T3CODE_RELAY_URL='https://relay.example.invalid' \
-      T3CODE_CLERK_PUBLISHABLE_KEY='pk_test_generic' \
-      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID='oauth-client-generic' \
-      "${missing_variable}=" \
-      "${repo_root}/.github/fork/assert-build-config.sh" "$bundle"
-done
+missing_anchor_bundle="${fixture_root}/missing-anchor.mjs"
+sed '/const buildTimeClerkPublishableKey/d' "$upstream_bundle" >"$missing_anchor_bundle"
+assert_fails extractor-rejects-absent-anchor \
+  node "${repo_root}/.github/fork/public-config.mjs" bundle "$missing_anchor_bundle"
 
-missing_bundle_value="${fixture_root}/bin-missing-oauth.mjs"
-printf '%s\n' 'https://relay.example.invalid' 'pk_test_generic' >"$missing_bundle_value"
-assert_fails build-config-rejects-value-missing-from-bundle \
-  env T3CODE_RELAY_URL='https://relay.example.invalid' \
-    T3CODE_CLERK_PUBLISHABLE_KEY='pk_test_generic' \
-    T3CODE_CLERK_CLI_OAUTH_CLIENT_ID='oauth-client-generic' \
-    "${repo_root}/.github/fork/assert-build-config.sh" "$missing_bundle_value"
+duplicate_anchor_bundle="${fixture_root}/duplicate-anchor.mjs"
+cp "$upstream_bundle" "$duplicate_anchor_bundle"
+printf '%s\n' \
+  'const buildTimeClerkPublishableKey = readBuildTimeValue("pk_test_duplicate");' \
+  >>"$duplicate_anchor_bundle"
+assert_fails extractor-rejects-duplicate-anchor \
+  node "${repo_root}/.github/fork/public-config.mjs" bundle "$duplicate_anchor_bundle"
+
+"${repo_root}/.github/fork/verify-base-version.sh" '0.0.37-wyrd.1' '0.0.37'
+echo "PASS release-base-version-matches-recorded-upstream-version"
+assert_fails release-base-version-rejects-mismatch \
+  "${repo_root}/.github/fork/verify-base-version.sh" '0.0.99-wyrd.1' '0.0.37'
+
+"${repo_root}/.github/fork/assert-build-config.sh" "$upstream_bundle" "$upstream_bundle" >/dev/null
+echo "PASS build-config-matches-upstream-derived-values"
+
+mismatched_bundle="${fixture_root}/mismatched.mjs"
+sed 's#https://relay.example.invalid#https://different.example.invalid#' \
+  "$upstream_bundle" >"$mismatched_bundle"
+assert_fails build-config-rejects-value-different-from-upstream \
+  "${repo_root}/.github/fork/assert-build-config.sh" "$mismatched_bundle" "$upstream_bundle"
+
+empty_bundle="${fixture_root}/empty.mjs"
+sed 's/token-fixture/ /' "$upstream_bundle" >"$empty_bundle"
+assert_fails build-config-rejects-empty-derived-value \
+  "${repo_root}/.github/fork/assert-build-config.sh" "$empty_bundle" "$empty_bundle"
+
+override_json="$({
+  T3CODE_RELAY_URL='https://override.example.invalid' \
+    node "${repo_root}/.github/fork/public-config.mjs" bundle "$upstream_bundle" --overrides
+})"
+node -e \
+  'const value = JSON.parse(process.argv[1]); if (value.T3CODE_RELAY_URL !== process.argv[2]) process.exit(1)' \
+  "$override_json" 'https://override.example.invalid'
+echo "PASS environment-override-takes-precedence-over-derived-value"
 
 package_fixture="${fixture_root}/package.json"
 printf '{"name":"generic","version":"1.0.0"}\n' >"$package_fixture"
