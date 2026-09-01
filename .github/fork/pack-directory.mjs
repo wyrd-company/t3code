@@ -5,11 +5,11 @@
 //     - .github/fork/test-packer.mjs
 // ---
 
-import { spawnSync } from "node:child_process";
-import path from "node:path";
+import * as NodeChildProcess from "node:child_process";
+import * as NodePath from "node:path";
 
 export function packDirectory(packageDirectory, outputDirectory) {
-  const packed = spawnSync(
+  const packed = NodeChildProcess.spawnSync(
     "pnpm",
     ["pack", "--config.node-linker=hoisted", "--json", "--pack-destination", outputDirectory],
     {
@@ -37,5 +37,5 @@ export function packDirectory(packageDirectory, outputDirectory) {
     throw new Error(`Unexpected pnpm pack result: ${packed.stdout}`);
   }
 
-  return path.resolve(packageDirectory, packResult.filename);
+  return NodePath.resolve(packageDirectory, packResult.filename);
 }
