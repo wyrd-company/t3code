@@ -1,0 +1,7 @@
+# ---
+# relationships:
+#   used_by:
+#     - .github/fork/check-allowlist.sh
+#     - FORK.md
+# ---
+v0.0.37
