@@ -17,13 +17,15 @@ Do not merge the fork branches together. Do not merge upstream into either branc
 
 ## Base pin and rebase
 
-The server branch base pin is [.github/fork/base-tag](.github/fork/base-tag), currently `v0.0.37` (`cefec32d6fc5d14f03e110ebdde534bdbcc9b62b`). Moving it is deliberate:
+The server branch base pin is [.github/fork/base-tag](.github/fork/base-tag), currently commit `cefec32d6fc5d14f03e110ebdde534bdbcc9b62b` from upstream tag `v0.0.37`. The executable pin is a full commit SHA so a checkout from `origin` does not require the upstream tag ref. Moving it is deliberate:
 
 ```bash
 git fetch upstream --tags
+new_base_tag=<new-upstream-tag>
+new_base_commit="$(git rev-parse "refs/tags/${new_base_tag}^{commit}")"
 git switch mcp-external-registration
-git rebase refs/tags/<new-upstream-tag>
-printf '%s\n' '<new-upstream-tag>' > .github/fork/base-tag
+git rebase "refs/tags/${new_base_tag}"
+printf '%s\n' "$new_base_commit" > .github/fork/base-tag
 .github/fork/check-allowlist.sh
 ```
 
