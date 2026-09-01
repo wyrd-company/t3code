@@ -201,8 +201,12 @@ T3CODE_RELAY_URL='https://override.example.invalid' \
 override_warning="${fixture_root}/override-warning"
 node "${repo_root}/.github/fork/resolve-public-config.mjs" \
   "$upstream_bundle" "$operator_overrides" >"${fixture_root}/effective.json" 2>"$override_warning"
-grep --fixed-strings --quiet \
-  'WARNING: T3CODE_RELAY_URL overrides upstream value' "$override_warning"
+if ! grep --fixed-strings --quiet \
+  'WARNING: T3CODE_RELAY_URL overrides upstream value' "$override_warning"; then
+  echo "FAIL divergent-environment-override-emits-warning" >&2
+  exit 1
+fi
+echo "PASS divergent-environment-override-emits-warning"
 override_bundle="${fixture_root}/declared-override.mjs"
 sed 's#https://relay.t3.codes#https://override.example.invalid#' \
   "$upstream_bundle" >"$override_bundle"
