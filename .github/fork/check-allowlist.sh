@@ -19,13 +19,13 @@ read_value_file() {
   sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$1" | tail -n 1
 }
 
-base_tag="$(read_value_file "$base_tag_file")"
-if [[ -z "$base_tag" ]]; then
-  echo "Fork base tag is empty: $base_tag_file" >&2
+base_commit_pin="$(read_value_file "$base_tag_file")"
+if [[ ! "$base_commit_pin" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "Fork base pin must be a full commit SHA: $base_tag_file" >&2
   exit 1
 fi
 
-base_commit="$(git rev-parse --verify "${base_tag}^{commit}")"
+base_commit="$(git rev-parse --verify "${base_commit_pin}^{commit}")"
 git rev-parse --verify "${diff_target}^{commit}" >/dev/null
 
 mapfile -t allowlist < <(
@@ -75,4 +75,4 @@ if (( ${#violations[@]} > 0 )); then
   exit 1
 fi
 
-echo "Fork diff is within the allowlist relative to ${base_tag} (${base_commit})."
+echo "Fork diff is within the allowlist relative to ${base_commit}."

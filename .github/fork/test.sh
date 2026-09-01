@@ -36,9 +36,9 @@ printf 'upstream\n' >"${allowlist_repo}/upstream.txt"
 printf 'base\n' >"${allowlist_repo}/apps/server/src/mcp/existing.ts"
 git -C "$allowlist_repo" add upstream.txt apps/server/src/mcp/existing.ts
 git -C "$allowlist_repo" commit --quiet -m base
-git -C "$allowlist_repo" tag v0.0.37
+base_commit="$(git -C "$allowlist_repo" rev-parse HEAD)"
 cp "${repo_root}/.github/fork/check-allowlist.sh" "${allowlist_repo}/.github/fork/"
-printf 'v0.0.37\n' >"${allowlist_repo}/.github/fork/base-tag"
+printf '%s\n' "$base_commit" >"${allowlist_repo}/.github/fork/base-tag"
 printf 'apps/server/src/mcp/\n' >"${allowlist_repo}/.github/fork/allowlist.txt"
 printf 'allowed\n' >"${allowlist_repo}/apps/server/src/mcp/registration.ts"
 printf 'modified\n' >"${allowlist_repo}/apps/server/src/mcp/existing.ts"
@@ -47,9 +47,18 @@ git -C "$allowlist_repo" commit --quiet -m allowed
 
 (
   cd "$allowlist_repo"
+  test -z "$(git tag --list)"
   .github/fork/check-allowlist.sh >/dev/null
 )
-echo "PASS allowlist-accepts-added-and-listed-paths"
+echo "PASS allowlist-accepts-reachable-commit-without-tag-ref"
+
+printf 'v0.0.37\n' >"${allowlist_repo}/.github/fork/tag-base-pin"
+# $1 belongs to the nested shell.
+# shellcheck disable=SC2016
+assert_fails allowlist-rejects-tag-name-as-base-pin \
+  env FORK_BASE_TAG_FILE="${allowlist_repo}/.github/fork/tag-base-pin" \
+    FORK_ALLOWLIST_FILE="${allowlist_repo}/.github/fork/allowlist.txt" \
+    bash -c 'cd "$1" && .github/fork/check-allowlist.sh' _ "$allowlist_repo"
 
 printf 'outside allowlist\n' >"${allowlist_repo}/upstream.txt"
 git -C "$allowlist_repo" add upstream.txt
