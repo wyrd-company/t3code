@@ -211,6 +211,7 @@ cat >"${curl_stub_directory}/curl" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >"$STUB_CURL_ARGUMENTS"
+if [[ ! -t 0 ]]; then cat >>"$STUB_CURL_ARGUMENTS"; fi
 if [[ " $* " == *' --fail '* && "${STUB_CURL_FAIL_ON_FAIL_FLAG:-}" == 1 ]]; then
   exit 22
 fi
@@ -218,7 +219,7 @@ printf '{"object":{"type":"commit","sha":"%s"}}\n' "$STUB_COMMIT"
 STUB
 chmod +x "${curl_stub_directory}/curl"
 curl_arguments="${fixture_root}/curl-arguments"
-assert_fails upstream-base-pin-enables-http-error-failure \
+assert_fails upstream-base-pin-wires-curl-fail-option \
   env PATH="${curl_stub_directory}:$PATH" \
     STUB_CURL_ARGUMENTS="$curl_arguments" \
     STUB_CURL_FAIL_ON_FAIL_FLAG=1 \
@@ -290,6 +291,11 @@ assert_fails_with divergent-environment-override-requires-acknowledgement \
   'Public configuration divergence requires T3CODE_ALLOW_PUBLIC_CONFIG_DIVERGENCE=1' \
   node "${repo_root}/.github/fork/resolve-public-config.mjs" \
     "$upstream_bundle" "$operator_overrides"
+assert_fails_with divergent-environment-override-rejects-true-acknowledgement \
+  'Public configuration divergence requires T3CODE_ALLOW_PUBLIC_CONFIG_DIVERGENCE=1' \
+  env T3CODE_ALLOW_PUBLIC_CONFIG_DIVERGENCE=true \
+    node "${repo_root}/.github/fork/resolve-public-config.mjs" \
+    "$upstream_bundle" "$operator_overrides"
 T3CODE_ALLOW_PUBLIC_CONFIG_DIVERGENCE=1 \
   node "${repo_root}/.github/fork/resolve-public-config.mjs" \
     "$upstream_bundle" "$operator_overrides" >"${fixture_root}/effective.json" 2>"$override_warning"
@@ -309,6 +315,14 @@ if ! T3CODE_ALLOW_PUBLIC_CONFIG_DIVERGENCE=1 \
   exit 1
 fi
 echo "PASS environment-override-takes-precedence-over-derived-value"
+
+T3CODE_RELAY_URL='' \
+  node "${repo_root}/.github/fork/capture-public-config-overrides.mjs" "$operator_overrides"
+if [[ "$(cat "$operator_overrides")" != '{}' ]]; then
+  echo "FAIL empty-environment-override-uses-derived-value" >&2
+  exit 1
+fi
+echo "PASS empty-environment-override-uses-derived-value"
 
 T3CODE_RELAY_URL=' ' \
   node "${repo_root}/.github/fork/capture-public-config-overrides.mjs" "$operator_overrides"
@@ -368,7 +382,27 @@ cat >"${release_stubs}/vp" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
 mkdir -p "$(dirname "$STUB_BUILT_BUNDLE")"
-cp "$STUB_WRONG_BUNDLE" "$STUB_BUILT_BUNDLE"
+if [[ "${STUB_FORCE_WRONG_BUNDLE:-}" == 1 ]]; then
+  cp "$STUB_WRONG_BUNDLE" "$STUB_BUILT_BUNDLE"
+  exit
+fi
+node - "$STUB_UPSTREAM_BUNDLE" "$STUB_BUILT_BUNDLE" <<'NODE'
+const fs = require("node:fs");
+const [sourcePath, outputPath] = process.argv.slice(2);
+const replacements = [
+  ["T3CODE_RELAY_URL", "https://relay.t3.codes"],
+  ["T3CODE_CLERK_PUBLISHABLE_KEY", "pk_live_Y2xlcmsudDMuY29kZXMk"],
+  ["T3CODE_CLERK_CLI_OAUTH_CLIENT_ID", "hzxSgY2cH10sDU2r"],
+  ["T3CODE_RELAY_CLIENT_OTLP_TRACES_URL", "https://api.axiom.co/v1/traces"],
+  ["T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET", "t3-code-relay-traces-prod"],
+  ["T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN", "xaat-8933d243-83eb-4ce0-86ba-8cdd018387c5"],
+];
+let source = fs.readFileSync(sourcePath, "utf8");
+for (const [name, original] of replacements) {
+  source = source.replace(JSON.stringify(original), JSON.stringify(process.env[name] ?? ""));
+}
+fs.writeFileSync(outputPath, source);
+NODE
 STUB
 chmod +x "${release_stubs}/vp"
 cat >"${release_stubs}/cargo" <<'STUB'
@@ -378,15 +412,73 @@ exit 29
 STUB
 chmod +x "${release_stubs}/cargo"
 release_base_pin="$(sed -n '/^[^#]/p' "${repo_root}/.github/fork/base-tag")"
+release_built_bundle="${fixture_root}/release-built.mjs"
+cp "$wrong_bundle" "$release_built_bundle"
+assert_fails_with release-build-exports-derived-config-to-build-environment \
+  'cargo must not run before public configuration assertion' \
+  env PATH="${release_stubs}:$PATH" \
+    NPM_COMMAND="$npm_release_stub" \
+    STUB_UPSTREAM_BUNDLE="$upstream_bundle" \
+    STUB_WRONG_BUNDLE="$wrong_bundle" \
+    STUB_BUILT_BUNDLE="$release_built_bundle" \
+    T3CODE_BUILT_BUNDLE_PATH="$release_built_bundle" \
+    GITHUB_API_COMMAND="$api_stub" \
+    STUB_COMMIT="$release_base_pin" \
+    "${repo_root}/.github/fork/build-release.sh" \
+    "${upstream_version}-wyrd.1" "${fixture_root}/release-output"
+
+assert_fails_with release-build-applies-acknowledged-operator-override \
+  'cargo must not run before public configuration assertion' \
+  env PATH="${release_stubs}:$PATH" \
+    NPM_COMMAND="$npm_release_stub" \
+    STUB_UPSTREAM_BUNDLE="$upstream_bundle" \
+    STUB_WRONG_BUNDLE="$wrong_bundle" \
+    STUB_BUILT_BUNDLE="$release_built_bundle" \
+    T3CODE_BUILT_BUNDLE_PATH="$release_built_bundle" \
+    GITHUB_API_COMMAND="$api_stub" \
+    STUB_COMMIT="$release_base_pin" \
+    T3CODE_RELAY_URL='https://override.example.invalid' \
+    T3CODE_ALLOW_PUBLIC_CONFIG_DIVERGENCE=1 \
+    "${repo_root}/.github/fork/build-release.sh" \
+    "${upstream_version}-wyrd.1" "${fixture_root}/release-output"
+
 assert_fails_with release-build-rejects-undeclared-built-config-divergence \
   'Built public configuration differs from expected value: T3CODE_RELAY_URL' \
   env PATH="${release_stubs}:$PATH" \
     NPM_COMMAND="$npm_release_stub" \
     STUB_UPSTREAM_BUNDLE="$upstream_bundle" \
     STUB_WRONG_BUNDLE="$wrong_bundle" \
-    STUB_BUILT_BUNDLE="${repo_root}/apps/server/dist/bin.mjs" \
+    STUB_FORCE_WRONG_BUNDLE=1 \
+    STUB_BUILT_BUNDLE="$release_built_bundle" \
+    T3CODE_BUILT_BUNDLE_PATH="$release_built_bundle" \
     GITHUB_API_COMMAND="$api_stub" \
     STUB_COMMIT="$release_base_pin" \
+    "${repo_root}/.github/fork/build-release.sh" \
+    "${upstream_version}-wyrd.1" "${fixture_root}/release-output"
+
+assert_fails_with release-build-rejects-version-mismatched-with-upstream \
+  'Release base version 0.0.36 does not match upstream version' \
+  env PATH="${release_stubs}:$PATH" \
+    NPM_COMMAND="$npm_release_stub" \
+    STUB_UPSTREAM_BUNDLE="$upstream_bundle" \
+    STUB_WRONG_BUNDLE="$wrong_bundle" \
+    STUB_BUILT_BUNDLE="$release_built_bundle" \
+    T3CODE_BUILT_BUNDLE_PATH="$release_built_bundle" \
+    GITHUB_API_COMMAND="$api_stub" \
+    STUB_COMMIT="$release_base_pin" \
+    "${repo_root}/.github/fork/build-release.sh" \
+    '0.0.36-wyrd.1' "${fixture_root}/release-output"
+
+assert_fails_with release-build-rejects-upstream-tag-mismatched-with-base-pin \
+  "not base pin ${release_base_pin}" \
+  env PATH="${release_stubs}:$PATH" \
+    NPM_COMMAND="$npm_release_stub" \
+    STUB_UPSTREAM_BUNDLE="$upstream_bundle" \
+    STUB_WRONG_BUNDLE="$wrong_bundle" \
+    STUB_BUILT_BUNDLE="$release_built_bundle" \
+    T3CODE_BUILT_BUNDLE_PATH="$release_built_bundle" \
+    GITHUB_API_COMMAND="$api_stub" \
+    STUB_COMMIT='dddddddddddddddddddddddddddddddddddddddd' \
     "${repo_root}/.github/fork/build-release.sh" \
     "${upstream_version}-wyrd.1" "${fixture_root}/release-output"
 
