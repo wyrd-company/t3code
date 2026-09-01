@@ -4,7 +4,7 @@
 //   modifies_temporarily: apps/server/package.json
 //   used_by: .github/fork/build-release.sh
 // ---
-import fs from "node:fs/promises";
+import * as NodeFSP from "node:fs/promises";
 
 import { isForkVersion } from "./version.mjs";
 
@@ -20,6 +20,6 @@ if (!isForkVersion(version)) {
   process.exit(1);
 }
 
-const packageJson = JSON.parse(await fs.readFile(packagePath, "utf8"));
+const packageJson = JSON.parse(await NodeFSP.readFile(packagePath, "utf8"));
 packageJson.version = version;
-await fs.writeFile(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+await NodeFSP.writeFile(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
