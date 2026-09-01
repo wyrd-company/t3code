@@ -183,11 +183,17 @@ assert_fails build-config-rejects-value-different-from-upstream \
   "${repo_root}/.github/fork/assert-build-config.sh" \
     "$mismatched_bundle" "$upstream_bundle" "$no_overrides"
 
-empty_bundle="${fixture_root}/empty-built.mjs"
-sed 's#https://relay.t3.codes# #' "$upstream_bundle" >"$empty_bundle"
-assert_fails build-config-rejects-empty-derived-value \
+empty_built_bundle="${fixture_root}/empty-built.mjs"
+sed 's#https://relay.t3.codes# #' "$upstream_bundle" >"$empty_built_bundle"
+assert_fails build-config-rejects-empty-built-value \
   "${repo_root}/.github/fork/assert-build-config.sh" \
-    "$empty_bundle" "$upstream_bundle" "$no_overrides"
+    "$empty_built_bundle" "$upstream_bundle" "$no_overrides"
+
+empty_upstream_bundle="${fixture_root}/empty-upstream.mjs"
+sed 's#https://relay.t3.codes# #' "$upstream_bundle" >"$empty_upstream_bundle"
+assert_fails build-config-rejects-empty-derived-value \
+  node "${repo_root}/.github/fork/resolve-public-config.mjs" \
+    "$empty_upstream_bundle" "$no_overrides"
 
 operator_overrides="${fixture_root}/operator-overrides.json"
 T3CODE_RELAY_URL='https://override.example.invalid' \
