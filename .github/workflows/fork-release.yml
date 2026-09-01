@@ -59,6 +59,9 @@ jobs:
           cache: true
           run-install: true
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Build release tarball
         env:
           GITHUB_TOKEN: ${{ github.token }}
