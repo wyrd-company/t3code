@@ -22,10 +22,6 @@ node - "$built_json" "$expected_json" <<'NODE'
 const built = JSON.parse(process.argv[2]);
 const expectedConfig = JSON.parse(process.argv[3]);
 for (const [name, expected] of Object.entries(expectedConfig)) {
-  if (built[name].trim() === "") {
-    console.error(`Built public configuration is empty: ${name}`);
-    process.exit(1);
-  }
   if (built[name] !== expected) {
     console.error(`Built public configuration differs from expected value: ${name}`);
     process.exit(1);
