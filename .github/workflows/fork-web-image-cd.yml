@@ -1,0 +1,172 @@
+# ---
+# relationships:
+#   builds: docker/t3code-web/Dockerfile
+#   publishes: ghcr.io/wyrd-company/t3code-web
+#   verifies: docker/t3code-web/nginx.conf
+# ---
+name: Fork web image CD
+
+on:
+  push:
+    tags:
+      - web/*
+
+concurrency:
+  group: fork-web-image-cd-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      T3CODE_BASE_COMMIT: cefec32d6fc5d14f03e110ebdde534bdbcc9b62b
+      T3CODE_VERSION: 0.0.37
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      image: ${{ steps.release.outputs.image }}
+    steps:
+      - name: Resolve release tag
+        id: release
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          requested_tag="$REF_NAME"
+          if [[ ! "$requested_tag" =~ ^web/[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            printf 'Expected a web/<version> release tag, got %s\n' "$requested_tag" >&2
+            exit 1
+          fi
+          tag="$requested_tag"
+          printf 'tag=%s\nversion=%s\nimage=ghcr.io/%s/t3code-web\ncreated=%s\n' \
+            "$tag" "${tag#web/}" "$OWNER" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ steps.release.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Verify release source
+        id: source
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$RELEASE_VERSION" != "$T3CODE_VERSION" ]; then
+            printf 'Release tag version %s does not match branch base version %s.\n' \
+              "$RELEASE_VERSION" "$T3CODE_VERSION" >&2
+            exit 1
+          fi
+
+          git fetch origin refs/heads/web-image:refs/remotes/origin/web-image
+          git merge-base --is-ancestor HEAD refs/remotes/origin/web-image
+          git cat-file -e "${T3CODE_BASE_COMMIT}^{commit}"
+
+          violations="$(
+            git diff --name-status "${T3CODE_BASE_COMMIT}...HEAD" |
+              awk '$1 != "A" || ($2 !~ /^docker\/t3code-web\// && $2 !~ /^\.github\/workflows\/fork-web-image-(ci|cd)\.yml$/)'
+          )"
+          if [ -n "$violations" ]; then
+            printf 'Web image release must contain only approved added files:\n%s\n' "$violations" >&2
+            exit 1
+          fi
+
+          grep --fixed-strings --quiet "v${T3CODE_VERSION}" docker/t3code-web/README.md
+          grep --fixed-strings --quiet "$T3CODE_BASE_COMMIT" docker/t3code-web/README.md
+          printf 'revision=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish
+        id: publish
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/t3code-web/Dockerfile
+          build-args: |
+            T3CODE_VERSION=${{ steps.release.outputs.version }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: |
+            ${{ steps.release.outputs.image }}:${{ steps.release.outputs.version }}
+            ${{ steps.release.outputs.image }}:latest
+          labels: |
+            org.opencontainers.image.created=${{ steps.release.outputs.created }}
+            org.opencontainers.image.revision=${{ steps.source.outputs.revision }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Attest image
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ steps.release.outputs.image }}
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          push-to-registry: true
+
+      - name: Make image public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          gh api \
+            --method PATCH \
+            --header 'Accept: application/vnd.github+json' \
+            "/orgs/${OWNER}/packages/container/t3code-web" \
+            -f visibility=public
+
+  anonymous-arm64-smoke:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Verify anonymous arm64 pull and runtime
+        env:
+          IMAGE: ${{ needs.publish.outputs.image }}:${{ needs.publish.outputs.version }}
+        run: |
+          set -euo pipefail
+          name="t3code-web-arm64-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            docker rm --force "$name" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker pull --platform linux/arm64 "$IMAGE"
+          docker run --detach --name "$name" --platform linux/arm64 "$IMAGE" >/dev/null
+
+          for _ in $(seq 1 30); do
+            health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$name")"
+            [ "$health" = healthy ] && break
+            sleep 1
+          done
+
+          test "$(docker inspect --format '{{.State.Health.Status}}' "$name")" = healthy
+          docker exec "$name" sh -c 'test "$(uname -m)" = aarch64'
+          docker exec "$name" test -f /usr/share/licenses/t3code/LICENSE
+          docker exec "$name" sh -c '! command -v node >/dev/null 2>&1 && ! command -v t3 >/dev/null 2>&1'
+
+          index="$(docker exec "$name" wget -q -O - http://127.0.0.1/)"
+          pair="$(docker exec "$name" wget -q -O - http://127.0.0.1/pair)"
+          grep -q '<div id="root">' <<<"$index"
+          grep -q '<div id="root">' <<<"$pair"
