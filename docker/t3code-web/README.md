@@ -54,5 +54,15 @@ git diff --name-status v<new-version>...HEAD
 ```
 
 The final command must report only added files under `docker/t3code-web/` and
-`.github/workflows/`. Build and run the image before publishing a matching
-`web/<new-version>` tag to `origin`.
+`.github/workflows/`. After the rebase:
+
+1. Update `T3CODE_BASE_COMMIT` and `T3CODE_VERSION` in both fork web image
+   workflows.
+2. Update this README's base pin and local build example.
+3. Compare `ARG VITE_PLUS_VERSION` in the Dockerfile with
+   `.catalog."vite-plus"` in `pnpm-workspace.yaml` and update it when needed.
+4. Build and run the image before publishing a matching `web/<new-version>` tag
+   to `origin`.
+
+CI rejects an old workflow pin, a changed upstream-authored file, or any added
+file outside the web image and its two workflows.
