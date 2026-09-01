@@ -78,10 +78,15 @@ assert.equal(findStep(releaseSteps, "Checkout").with["fetch-depth"], 0);
 assert.match(findStep(releaseSteps, "Resolve release version").run, /release-version\.mjs/);
 assert.equal(findStep(releaseSteps, "Check fork boundary").run, ".github/fork/check-allowlist.sh");
 assert.match(findStep(releaseSteps, "Build release tarball").run, /build-release\.sh/);
+assert.match(findStep(releaseSteps, "Verify clean local install").run, /t3 v\$EXPECTED_VERSION/);
 assert.match(findStep(releaseSteps, "Publish GitHub Release").run, /gh release create/);
 assert.match(
   findStep(releaseSteps, "Verify anonymous release install").run,
   /node:24-bookworm-slim/,
+);
+assert.match(
+  findStep(releaseSteps, "Verify anonymous release install").run,
+  /t3 v\$EXPECTED_VERSION/,
 );
 
 console.log("PASS fork-workflows-match-trigger-build-and-release-contracts");
