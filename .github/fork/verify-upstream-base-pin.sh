@@ -30,7 +30,9 @@ api_get() {
   else
     curl_arguments=(--fail --silent --show-error)
     if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-      curl_arguments+=(--header "Authorization: Bearer ${GITHUB_TOKEN}")
+      printf 'Authorization: Bearer %s\n' "$GITHUB_TOKEN" | \
+        curl "${curl_arguments[@]}" --header @- "$1"
+      return
     fi
     curl "${curl_arguments[@]}" "$1"
   fi

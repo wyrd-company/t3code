@@ -33,6 +33,7 @@ node_pty_prebuild="${work_directory}/pty.node"
 upstream_bundle="${work_directory}/upstream-bin.mjs"
 operator_overrides="${work_directory}/operator-overrides.json"
 effective_config="${work_directory}/effective.env0"
+built_bundle="${T3CODE_BUILT_BUNDLE_PATH:-${repo_root}/apps/server/dist/bin.mjs}"
 package_changed=false
 
 cleanup() {
@@ -69,7 +70,7 @@ node "${repo_root}/.github/fork/set-package-version.mjs" "$package_json" "$versi
 
 vp run --filter t3 build
 "${repo_root}/.github/fork/assert-build-config.sh" \
-  "${repo_root}/apps/server/dist/bin.mjs" "$upstream_bundle" "$operator_overrides"
+  "$built_bundle" "$upstream_bundle" "$operator_overrides"
 
 cargo build --locked --release --manifest-path "${repo_root}/native/resource-monitor/Cargo.toml"
 monitor_target="${repo_root}/apps/server/dist/resource-monitor/linux-x64"

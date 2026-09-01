@@ -101,6 +101,10 @@ NodeAssert.equal(
   ".github/fork/check-allowlist.sh",
 );
 NodeAssert.match(findStep(releaseSteps, "Build release tarball").run, /build-release\.sh/);
+NodeAssert.equal(
+  findStep(releaseSteps, "Build release tarball").env.GITHUB_TOKEN,
+  "${{ github.token }}",
+);
 NodeAssert.match(
   findStep(releaseSteps, "Verify clean local install").run,
   /t3 v\$EXPECTED_VERSION/,
