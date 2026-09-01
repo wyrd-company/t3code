@@ -150,6 +150,14 @@ assert_fails_with extractor-rejects-multiple-pack-results \
 
 upstream_version="$("${repo_root}/.github/fork/read-upstream-version.sh" \
   "${repo_root}/.github/fork/upstream-version")"
+documented_base_pin="$(sed -n '/^[^#]/p' "${repo_root}/.github/fork/base-tag")"
+if ! grep --fixed-strings --quiet -- \
+  "currently commit \`${documented_base_pin}\` from upstream tag \`v${upstream_version}\`" \
+  "${repo_root}/FORK.md"; then
+  echo "FAIL fork-doc-base-pin-matches-executable-records" >&2
+  exit 1
+fi
+echo "PASS fork-doc-base-pin-matches-executable-records"
 "${repo_root}/.github/fork/verify-base-version.sh" \
   "${upstream_version}-wyrd.1" "$upstream_version"
 echo "PASS release-base-version-matches-recorded-upstream-version"
@@ -241,6 +249,13 @@ if grep --fixed-strings --quiet -- 'generic-token' "$curl_arguments" || \
   exit 1
 fi
 echo "PASS upstream-base-pin-authenticates-github-api-request"
+if ! grep --fixed-strings --quiet -- \
+  "https://api.github.com/repos/pingdotgg/t3code/git/ref/tags/v${upstream_version}" \
+  "$curl_arguments"; then
+  echo "FAIL upstream-base-pin-uses-upstream-github-api-root" >&2
+  exit 1
+fi
+echo "PASS upstream-base-pin-uses-upstream-github-api-root"
 
 api_invalid_json="${fixture_root}/github-api-invalid-json"
 printf '%s\n' '#!/usr/bin/env bash' "printf '%s\\n' '<html>rate limited</html>'" \
@@ -402,6 +417,12 @@ tar -czf "${destination}/t3-0.0.37.tgz" -C "$package_root" package
 printf '%s\n' '[{"filename":"t3-0.0.37.tgz"}]'
 STUB
 chmod +x "$npm_release_stub"
+cp "$npm_release_stub" "${release_stubs}/npm"
+PATH="${release_stubs}:$PATH" \
+STUB_UPSTREAM_BUNDLE="$upstream_bundle" \
+  env -u NPM_COMMAND node "${repo_root}/.github/fork/public-config.mjs" \
+    package "$upstream_version" >/dev/null
+echo "PASS extractor-uses-default-npm-command"
 cat >"${release_stubs}/vp" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -433,10 +454,44 @@ STUB
 chmod +x "${release_stubs}/vp"
 cat >"${release_stubs}/cargo" <<'STUB'
 #!/usr/bin/env bash
+set -euo pipefail
+if [[ "${STUB_CARGO_SUCCEED:-}" == 1 ]]; then
+  repo_root="$(git rev-parse --show-toplevel)"
+  monitor="${repo_root}/native/resource-monitor/target/release/t3-resource-monitor"
+  mkdir -p "$(dirname "$monitor")"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$monitor"
+  chmod +x "$monitor"
+  exit 0
+fi
 echo 'cargo must not run before public configuration assertion' >&2
 exit 29
 STUB
 chmod +x "${release_stubs}/cargo"
+cat >"${release_repo}/.github/fork/build-node-pty.sh" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'fixture node pty\n' >"$1"
+STUB
+chmod +x "${release_repo}/.github/fork/build-node-pty.sh"
+cat >"${release_repo}/.github/fork/pack-server.mjs" <<'STUB'
+#!/usr/bin/env node
+import * as fs from "node:fs";
+import * as path from "node:path";
+const [version, outputDirectory] = process.argv.slice(2);
+fs.mkdirSync(outputDirectory, { recursive: true });
+const tarball = path.join(outputDirectory, `t3-${version}.tgz`);
+fs.writeFileSync(tarball, "fixture tarball\n");
+console.log(tarball);
+STUB
+chmod +x "${release_repo}/.github/fork/pack-server.mjs"
+cat >"${release_repo}/.github/fork/verify-release-package.mjs" <<'STUB'
+#!/usr/bin/env node
+process.exit(0);
+STUB
+chmod +x "${release_repo}/.github/fork/verify-release-package.mjs"
+git -C "$release_repo" add .github/fork/build-node-pty.sh \
+  .github/fork/pack-server.mjs .github/fork/verify-release-package.mjs
+git -C "$release_repo" commit --quiet -m 'stub post-assertion release tools'
 cat >"${release_stubs}/run-release" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -521,6 +576,27 @@ assert_release_case_fails_with release-build-rejects-upstream-tag-mismatched-wit
     "${release_stubs}/run-release" \
     "${upstream_version}-wyrd.1" "${fixture_root}/release-output"
 echo "PASS release-build-restores-package-after-failure"
+
+if ! PATH="${release_stubs}:$PATH" \
+  NPM_COMMAND="$npm_release_stub" \
+  STUB_UPSTREAM_BUNDLE="$upstream_bundle" \
+  STUB_WRONG_BUNDLE="$wrong_bundle" \
+  STUB_RELEASE_REPO="$release_repo" \
+  STUB_CARGO_SUCCEED=1 \
+  GITHUB_API_COMMAND="$api_stub" \
+  STUB_COMMIT="$release_base_pin" \
+  "${release_stubs}/run-release" \
+  "${upstream_version}-wyrd.1" "${fixture_root}/release-output"; then
+  echo "FAIL release-build-completes-success-path" >&2
+  exit 1
+fi
+if [[ "$(node -p "require('${release_repo}/apps/server/package.json').version")" != '0.0.36' ]] || \
+  ! git -C "$release_repo" diff --quiet -- apps/server/package.json; then
+  echo "FAIL release-build-restores-package-after-success" >&2
+  exit 1
+fi
+echo "PASS release-build-completes-success-path"
+echo "PASS release-build-restores-package-after-success"
 
 package_fixture="${fixture_root}/package.json"
 printf '{"name":"generic","version":"1.0.0"}\n' >"$package_fixture"

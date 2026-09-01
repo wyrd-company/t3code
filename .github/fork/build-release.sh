@@ -89,3 +89,8 @@ node "${repo_root}/.github/fork/verify-release-package.mjs" "$tarball" "$version
 cleanup
 package_changed=false
 trap - EXIT
+
+if ! git diff --quiet -- apps/server/package.json; then
+  echo "Build did not restore apps/server/package.json." >&2
+  exit 1
+fi
