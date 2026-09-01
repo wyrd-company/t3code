@@ -42,7 +42,7 @@ The executable source of this list is [.github/fork/allowlist.txt](.github/fork/
 
 ## Server release
 
-Server tags use `server/<upstream-version>-wyrd.<release>`, for example `server/0.0.37-wyrd.1`. This namespace cannot match upstream's `v*.*.*` release trigger. A tag builds the server and Linux x64 resource monitor, packs `t3-<version>.tgz`, and publishes it as a public GitHub Release asset.
+Server tags use `server/<upstream-version>-wyrd.<release>`, for example `server/0.0.37-wyrd.1`. This namespace cannot match upstream's `v*.*.*` release trigger. A tag builds the server and Linux x64 resource monitor, packs `t3-<version>.tgz`, and publishes it as a public GitHub Release asset. The tarball bundles a Linux x64 `node-pty` prebuild produced on Debian so installation does not require Python or a C++ toolchain.
 
 The build temporarily changes the package version in the runner worktree so that `t3 --version` reports the fork version. The build restores `apps/server/package.json` before publication; the fork carries no committed edit to that upstream file.
 

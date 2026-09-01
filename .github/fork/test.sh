@@ -6,6 +6,8 @@
 #     - .github/fork/assert-build-config.sh
 #     - .github/fork/set-package-version.mjs
 #     - .github/fork/release-version.mjs
+#     - .github/fork/bundle-node-pty.mjs
+#     - .github/fork/test-packer.mjs
 #     - .github/fork/test-workflows.mjs
 # ---
 set -euo pipefail
@@ -96,4 +98,5 @@ echo "PASS release-tag-yields-fork-version"
 assert_fails release-tag-rejects-upstream-namespace \
   "${repo_root}/.github/fork/release-version.mjs" 'v0.0.37'
 
+node "${repo_root}/.github/fork/test-packer.mjs"
 node "${repo_root}/.github/fork/test-workflows.mjs"
