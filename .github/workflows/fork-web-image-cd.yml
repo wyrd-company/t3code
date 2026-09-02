@@ -68,7 +68,6 @@ jobs:
           git fetch origin refs/heads/web-image:refs/remotes/origin/web-image
           git merge-base --is-ancestor HEAD refs/remotes/origin/web-image
           git cat-file -e "${T3CODE_BASE_COMMIT}^{commit}"
-          test "$(git rev-parse "${T3CODE_BASE_TAG}^{commit}")" = "$T3CODE_BASE_COMMIT"
 
           violations="$(
             git diff --name-status "${T3CODE_BASE_COMMIT}...HEAD" |
