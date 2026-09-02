@@ -39,7 +39,6 @@ jobs:
         run: |
           set -euo pipefail
           git cat-file -e "${T3CODE_BASE_COMMIT}^{commit}"
-          test "$(git rev-parse "${T3CODE_BASE_TAG}^{commit}")" = "$T3CODE_BASE_COMMIT"
 
           violations="$(
             git diff --name-status "${T3CODE_BASE_COMMIT}...HEAD" |
@@ -69,7 +68,9 @@ jobs:
           import sys
           from pathlib import Path
 
-          workflow = Path(".github/workflows/fork-web-image-cd.yml").read_text()
+          ci_workflow = Path(".github/workflows/fork-web-image-ci.yml").read_text()
+          cd_workflow = Path(".github/workflows/fork-web-image-cd.yml").read_text()
+          readme = Path("docker/t3code-web/README.md").read_text()
           failures = []
 
           def check(name, condition, detail):
@@ -79,12 +80,63 @@ jobs:
                   failures.append(name)
                   print(f"FAIL: {name}: {detail}", file=sys.stderr)
 
-          def job(name):
+          def job(workflow, name):
               match = re.search(
                   rf"(?ms)^  {re.escape(name)}:\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
                   workflow,
               )
               return match.group("body") if match else None
+
+          def workflow_env(workflow, name):
+              match = re.search(rf"(?m)^      {name}: (?P<value>\S+)\s*$", workflow)
+              return match.group("value") if match else None
+
+          expected_base_tag = "v0.0.37"
+          expected_base_commit = "cefec32d6fc5d14f03e110ebdde534bdbcc9b62b"
+          verification_jobs = {
+              "ci": job(ci_workflow, "build-and-smoke-test"),
+              "cd": job(cd_workflow, "publish"),
+          }
+          for workflow_name, workflow in (
+              ("ci", ci_workflow),
+              ("cd", cd_workflow),
+          ):
+              body = verification_jobs[workflow_name]
+              tag_resolution_patterns = (
+                  r"(?m)^\s*git\s+(?:rev-parse|show-ref|describe)\b[^\n]*T3CODE_BASE_TAG",
+                  r"(?m)^\s*git\s+fetch\b[^\n]*(?:--tags|T3CODE_BASE_TAG|refs/tags/)",
+              )
+              check(
+                  f"test_{workflow_name}_base_verification_avoids_tag_resolution",
+                  body is not None
+                  and not any(
+                      re.search(pattern, body) for pattern in tag_resolution_patterns
+                  ),
+                  f"{workflow_name.upper()} must not resolve or fetch the upstream base tag",
+              )
+              check(
+                  f"test_{workflow_name}_additive_diff_uses_pinned_commit",
+                  body is not None
+                  and 'git cat-file -e "${T3CODE_BASE_COMMIT}^{commit}"' in body
+                  and 'git diff --name-status "${T3CODE_BASE_COMMIT}...HEAD"' in body,
+                  f"{workflow_name.upper()} must verify and diff from the pinned base commit",
+              )
+              check(
+                  f"test_{workflow_name}_upstream_base_pin",
+                  workflow_env(workflow, "T3CODE_BASE_TAG") == expected_base_tag
+                  and workflow_env(workflow, "T3CODE_BASE_COMMIT")
+                  == expected_base_commit,
+                  f"{workflow_name.upper()} must retain the accepted upstream tag and commit identity",
+              )
+
+          check(
+              "test_readme_upstream_base_tag_and_commit_agree",
+              expected_base_tag in readme
+              and expected_base_commit in readme
+              and "does not mirror upstream `v*` tags" in readme
+              and "verification uses the pinned base commit" in readme,
+              "README must document the tag identity, commit pin, and origin-only topology",
+          )
 
           forbidden_visibility_patterns = (
               r"(?i)make image public",
@@ -94,11 +146,11 @@ jobs:
           )
           check(
               "test_package_visibility_mutation_absent",
-              not any(re.search(pattern, workflow) for pattern in forbidden_visibility_patterns),
+              not any(re.search(pattern, cd_workflow) for pattern in forbidden_visibility_patterns),
               "CD must not mutate package visibility or require package administration",
           )
 
-          publish = job("publish")
+          publish = job(cd_workflow, "publish")
           check(
               "test_publish_image_name",
               publish is not None
@@ -147,10 +199,10 @@ jobs:
                   and release_version != base_tag.removeprefix("v"),
                   "fork release version must differ from the upstream base tag",
               )
-              readme = Path("docker/t3code-web/README.md").read_text()
               identity_guards = (
                   '"$RELEASE_VERSION" != "$T3CODE_RELEASE_VERSION"',
-                  'git rev-parse "${T3CODE_BASE_TAG}^{commit}"',
+                  'git cat-file -e "${T3CODE_BASE_COMMIT}^{commit}"',
+                  'git diff --name-status "${T3CODE_BASE_COMMIT}...HEAD"',
                   'grep --fixed-strings --quiet "$T3CODE_BASE_TAG"',
                   'grep --fixed-strings --quiet "$T3CODE_BASE_COMMIT"',
                   'grep --fixed-strings --quiet "web/${T3CODE_RELEASE_VERSION}"',
@@ -167,7 +219,7 @@ jobs:
                   "base and fork release identities must remain guarded and documented",
               )
 
-          anonymous = job("anonymous-arm64-smoke")
+          anonymous = job(cd_workflow, "anonymous-arm64-smoke")
           check(
               "test_anonymous_proof_job_exists",
               anonymous is not None,
