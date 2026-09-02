@@ -87,21 +87,28 @@ jobs:
               )
               return match.group("body") if match else None
 
+          def step(workflow, name):
+              match = re.search(
+                  rf"(?ms)^      - name: {re.escape(name)}\n(?P<body>.*?)(?=^      - name: |\Z)",
+                  workflow,
+              )
+              return match.group("body") if match else None
+
           def workflow_env(workflow, name):
               match = re.search(rf"(?m)^      {name}: (?P<value>\S+)\s*$", workflow)
               return match.group("value") if match else None
 
           expected_base_tag = "v0.0.37"
           expected_base_commit = "cefec32d6fc5d14f03e110ebdde534bdbcc9b62b"
-          verification_jobs = {
-              "ci": job(ci_workflow, "build-and-smoke-test"),
-              "cd": job(cd_workflow, "publish"),
+          verification_steps = {
+              "ci": step(ci_workflow, "Verify additive fork boundary"),
+              "cd": step(cd_workflow, "Verify release source"),
           }
           for workflow_name, workflow in (
               ("ci", ci_workflow),
               ("cd", cd_workflow),
           ):
-              body = verification_jobs[workflow_name]
+              body = verification_steps[workflow_name]
               tag_resolution_patterns = (
                   r"(?m)^\s*git\s+(?:rev-parse|show-ref|describe)\b[^\n]*T3CODE_BASE_TAG",
                   r"(?m)^\s*git\s+fetch\b[^\n]*(?:--tags|T3CODE_BASE_TAG|refs/tags/)",
