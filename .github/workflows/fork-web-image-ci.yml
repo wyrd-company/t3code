@@ -110,8 +110,8 @@ jobs:
           ):
               body = verification_steps[workflow_name]
               tag_resolution_patterns = (
-                  r"(?m)^\s*git\s+(?:rev-parse|show-ref|describe)\b[^\n]*T3CODE_BASE_TAG",
-                  r"(?m)^\s*git\s+fetch\b[^\n]*(?:--tags|T3CODE_BASE_TAG|refs/tags/)",
+                  r"(?m)^.*\bgit\s+[^\n]*(?:T3CODE_BASE_TAG|refs/tags/)",
+                  r"(?m)^.*\bgit\s+fetch\b[^\n]*--tags",
               )
               check(
                   f"test_{workflow_name}_base_verification_avoids_tag_resolution",
