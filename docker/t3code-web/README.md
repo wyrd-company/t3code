@@ -14,7 +14,10 @@ it with Nginx. It contains no T3 server, agent runtime, credentials, project
 files, or relay modifications.
 
 The `web-image` branch base is the upstream `v0.0.37` tag at
-`cefec32d6fc5d14f03e110ebdde534bdbcc9b62b`. The fork release identity is
+`cefec32d6fc5d14f03e110ebdde534bdbcc9b62b`. The fork origin intentionally
+does not mirror upstream `v*` tags, so CI and CD do not resolve the tag there;
+verification uses the pinned base commit for executable existence and the
+additive diff. The fork release identity is
 `web/0.0.37-wyrd.1`, which publishes image version `0.0.37-wyrd.1`. The image
 source version comes from the `web/<version>` release tag; it does not use a
 downloaded source archive or a source checksum.
