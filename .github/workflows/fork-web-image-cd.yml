@@ -20,9 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      T3CODE_BASE_TAG: v0.0.37
-      T3CODE_BASE_COMMIT: cefec32d6fc5d14f03e110ebdde534bdbcc9b62b
-      T3CODE_RELEASE_VERSION: 0.0.37-wyrd.1
+      T3CODE_BASE_TAG: v0.0.38
+      T3CODE_BASE_COMMIT: c0995d2eaf8ec787b3318ed1169ae266ed1529f8
+      T3CODE_RELEASE_VERSION: 0.0.38-wyrd.1
     permissions:
       contents: read
       packages: write
