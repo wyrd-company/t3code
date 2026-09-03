@@ -111,6 +111,7 @@ export interface CursorAdapterLiveOptions {
    * the latest snapshot so the closure isn't stale.
    */
   readonly resolveSettings?: Effect.Effect<CursorSettings>;
+  readonly makeRuntime?: typeof makeCursorAcpRuntime;
 }
 
 interface PendingApproval {
@@ -553,7 +554,7 @@ export function makeCursorAdapter(
             ? yield* options.resolveSettings
             : cursorSettings;
 
-          const acp = yield* makeCursorAcpRuntime(
+          const acp = yield* (options?.makeRuntime ?? makeCursorAcpRuntime)(
             attachCursorMcpForThread(input.threadId, {
               cursorSettings: effectiveCursorSettings,
               ...(options?.environment ? { environment: options.environment } : {}),

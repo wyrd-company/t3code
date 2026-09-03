@@ -74,8 +74,11 @@ credential for that thread. Provider starts, restarts, and stops do not rotate,
 replace, or clear it; only the authenticated external clear operation does.
 External endpoints reach Claude Agent, Codex, Cursor, Grok, and OpenCode through
 each driver's existing native MCP configuration. Callers must register before
-starting the provider session; registration and clear operations do not
-reconfigure a running session.
+starting the provider session. Registration immediately revokes that thread's
+active internal browser-tool credential, so a running session can no longer use
+that credential. The new external configuration attaches only when the provider
+session next starts. Clearing an external registration does not reconfigure a
+running session.
 
 External registrations deliberately record browser-tools availability as false,
 but the current driver plumbing does not consume that registry field. Claude
