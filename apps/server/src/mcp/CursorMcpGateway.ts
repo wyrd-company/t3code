@@ -31,6 +31,8 @@ interface Downstream {
   readonly close: () => Promise<void>;
 }
 
+type DownstreamTool = Awaited<ReturnType<Client["listTools"]>>["tools"][number];
+
 export interface CursorMcpGatewayConfig {
   readonly name: typeof McpProviderSession.INTERNAL_MCP_SERVER_NAME;
   readonly endpoint: string;
@@ -81,8 +83,60 @@ const toEffectContent = (content: ReadonlyArray<Record<string, unknown>>) =>
         data: new Uint8Array(Buffer.from(block.data, "base64")),
       };
     }
+    if (
+      block.type === "resource" &&
+      typeof block.resource === "object" &&
+      block.resource !== null &&
+      "blob" in block.resource &&
+      typeof block.resource.blob === "string"
+    ) {
+      return {
+        ...block,
+        resource: {
+          ...block.resource,
+          blob: new Uint8Array(Buffer.from(block.resource.blob, "base64")),
+        },
+      };
+    }
     return block;
   }) as Array<typeof McpSchema.ContentBlock.Type>;
+
+const listAllTools = (downstream: Downstream) =>
+  Effect.gen(function* () {
+    const tools: Array<DownstreamTool> = [];
+    const seenCursors = new Set<string>();
+    let cursor: string | undefined;
+    do {
+      const page = yield* Effect.tryPromise({
+        try: () => downstream.client.listTools(cursor === undefined ? undefined : { cursor }),
+        catch: (cause) =>
+          new CursorMcpGatewayStartupError({
+            message: `Failed to list tools from MCP downstream '${downstream.name}'.`,
+            cause,
+          }),
+      });
+      tools.push(...page.tools);
+      cursor = page.nextCursor;
+      if (cursor !== undefined && (cursor.length === 0 || seenCursors.has(cursor))) {
+        return yield* new CursorMcpGatewayStartupError({
+          message: `MCP downstream '${downstream.name}' returned an invalid or cyclic tools cursor.`,
+        });
+      }
+      if (cursor !== undefined) seenCursors.add(cursor);
+    } while (cursor !== undefined);
+    return tools;
+  });
+
+const toEffectAnnotations = (annotations: DownstreamTool["annotations"]) =>
+  annotations === undefined
+    ? undefined
+    : {
+        ...(annotations.title === undefined ? {} : { title: annotations.title }),
+        readOnlyHint: annotations.readOnlyHint ?? false,
+        destructiveHint: annotations.destructiveHint ?? true,
+        idempotentHint: annotations.idempotentHint ?? false,
+        openWorldHint: annotations.openWorldHint ?? true,
+      };
 
 type GatewayHttpEffect = Effect.Effect<HttpServerResponse.HttpServerResponse, Types.unhandled>;
 
@@ -150,15 +204,7 @@ export const startCursorMcpGateway = Effect.fn("CursorMcpGateway.start")(functio
 
   const advertised = yield* Effect.forEach(
     downstreams,
-    (downstream) =>
-      Effect.tryPromise({
-        try: () => downstream.client.listTools(),
-        catch: (cause) =>
-          new CursorMcpGatewayStartupError({
-            message: `Failed to list tools from MCP downstream '${downstream.name}'.`,
-            cause,
-          }),
-      }).pipe(Effect.map((result) => ({ downstream, tools: result.tools }))),
+    (downstream) => listAllTools(downstream).pipe(Effect.map((tools) => ({ downstream, tools }))),
     { concurrency: "unbounded" },
   );
   const owners = new Map<string, Downstream>();
@@ -180,9 +226,16 @@ export const startCursorMcpGateway = Effect.fn("CursorMcpGateway.start")(functio
         yield* server.addTool({
           tool: new McpSchema.Tool({
             name: tool.name,
+            ...(tool.title === undefined ? {} : { title: tool.title }),
             ...(tool.description === undefined ? {} : { description: tool.description }),
             inputSchema: tool.inputSchema,
             ...(tool.outputSchema === undefined ? {} : { outputSchema: tool.outputSchema }),
+            ...(tool.annotations === undefined
+              ? {}
+              : { annotations: toEffectAnnotations(tool.annotations) }),
+            ...(tool._meta === undefined
+              ? {}
+              : { _meta: tool._meta as (typeof McpSchema.Tool.Type)["_meta"] }),
           }),
           annotations: Context.empty(),
           handle: (payload) =>
