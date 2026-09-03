@@ -80,7 +80,11 @@ it.effect("rejects unauthenticated external MCP registration without changing th
       expect(response.status, yield* response.text).toBe(401);
       expect(McpProviderSession.readMcpProviderSessionIncludingExternal(threadId)).toBeUndefined();
     }),
-  ).pipe(Effect.provide(Layer.mergeAll(authLayer("missing"), NodeHttpServer.layerTest))),
+  ).pipe(
+    Effect.provide(
+      Layer.mergeAll(authLayer("missing"), NodeHttpServer.layerTest, NodeServices.layer),
+    ),
+  ),
 );
 
 it.effect("rejects external MCP registration without orchestration operate scope", () =>
@@ -96,7 +100,9 @@ it.effect("rejects external MCP registration without orchestration operate scope
       expect(response.status, yield* response.text).toBe(403);
       expect(McpProviderSession.readMcpProviderSessionIncludingExternal(threadId)).toBeUndefined();
     }),
-  ).pipe(Effect.provide(Layer.mergeAll(authLayer("read"), NodeHttpServer.layerTest))),
+  ).pipe(
+    Effect.provide(Layer.mergeAll(authLayer("read"), NodeHttpServer.layerTest, NodeServices.layer)),
+  ),
 );
 
 it.effect("rejects a non-HTTP external MCP endpoint", () =>
@@ -118,7 +124,11 @@ it.effect("rejects a non-HTTP external MCP endpoint", () =>
       expect(body).not.toContain(authorizationHeader);
       expect(McpProviderSession.readMcpProviderSessionIncludingExternal(threadId)).toBeUndefined();
     }),
-  ).pipe(Effect.provide(Layer.mergeAll(authLayer("operate"), NodeHttpServer.layerTest))),
+  ).pipe(
+    Effect.provide(
+      Layer.mergeAll(authLayer("operate"), NodeHttpServer.layerTest, NodeServices.layer),
+    ),
+  ),
 );
 
 it.effect("rejects a non-Bearer external MCP authorization header without returning it", () =>
@@ -129,7 +139,11 @@ it.effect("rejects a non-Bearer external MCP authorization header without return
       const client = yield* HttpClient.HttpClient;
       const secret = "secret-without-bearer-scheme";
       const response = yield* client.put(EXTERNAL_MCP_REGISTRATION_PATH, {
-        body: HttpBody.jsonUnsafe({ threadId, endpoint, authorizationHeader: secret }),
+        body: HttpBody.jsonUnsafe({
+          threadId,
+          endpoint,
+          authorizationHeader: secret,
+        }),
       });
       const body = yield* response.text;
 
@@ -137,7 +151,11 @@ it.effect("rejects a non-Bearer external MCP authorization header without return
       expect(body).not.toContain(secret);
       expect(McpProviderSession.readMcpProviderSessionIncludingExternal(threadId)).toBeUndefined();
     }),
-  ).pipe(Effect.provide(Layer.mergeAll(authLayer("operate"), NodeHttpServer.layerTest))),
+  ).pipe(
+    Effect.provide(
+      Layer.mergeAll(authLayer("operate"), NodeHttpServer.layerTest, NodeServices.layer),
+    ),
+  ),
 );
 
 it.effect("rejects a blank external MCP thread ID", () =>
@@ -147,13 +165,21 @@ it.effect("rejects a blank external MCP thread ID", () =>
       yield* serve.pipe(Layer.build);
       const client = yield* HttpClient.HttpClient;
       const response = yield* client.put(EXTERNAL_MCP_REGISTRATION_PATH, {
-        body: HttpBody.jsonUnsafe({ threadId: " ", endpoint, authorizationHeader }),
+        body: HttpBody.jsonUnsafe({
+          threadId: " ",
+          endpoint,
+          authorizationHeader,
+        }),
       });
 
       expect(response.status).toBe(400);
       expect(McpProviderSession.readMcpProviderSessionIncludingExternal(threadId)).toBeUndefined();
     }),
-  ).pipe(Effect.provide(Layer.mergeAll(authLayer("operate"), NodeHttpServer.layerTest))),
+  ).pipe(
+    Effect.provide(
+      Layer.mergeAll(authLayer("operate"), NodeHttpServer.layerTest, NodeServices.layer),
+    ),
+  ),
 );
 
 it.effect("registers, plumbs, and clears one external MCP session for Claude and Codex", () =>
@@ -205,12 +231,20 @@ it.effect("registers, plumbs, and clears one external MCP session for Claude and
       ).toBe(alternateThreadId);
       McpProviderSession.clearAllMcpProviderSessions();
     }),
-  ).pipe(Effect.provide(Layer.mergeAll(authLayer("operate"), NodeHttpServer.layerTest))),
+  ).pipe(
+    Effect.provide(
+      Layer.mergeAll(authLayer("operate"), NodeHttpServer.layerTest, NodeServices.layer),
+    ),
+  ),
 );
 
 it("keeps external registration when the internal credential path clears or replaces a thread", () => {
   McpProviderSession.clearAllMcpProviderSessions();
-  McpProviderSession.setExternalMcpProviderSession({ threadId, endpoint, authorizationHeader });
+  McpProviderSession.setExternalMcpProviderSession({
+    threadId,
+    endpoint,
+    authorizationHeader,
+  });
 
   McpProviderSession.setMcpProviderSession({
     source: "internal",
