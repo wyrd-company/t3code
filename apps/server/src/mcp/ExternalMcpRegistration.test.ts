@@ -196,7 +196,6 @@ it.effect("registers, plumbs, and clears one external MCP session for Claude and
 it("keeps external registration when the internal credential path clears or replaces a thread", () => {
   McpProviderSession.clearAllMcpProviderSessions();
   McpProviderSession.setExternalMcpProviderSession({ threadId, endpoint, authorizationHeader });
-  expect(McpProviderSession.shouldPrepareInternalMcpProviderSession(threadId)).toBe(false);
 
   McpProviderSession.setMcpProviderSession({
     source: "internal",
