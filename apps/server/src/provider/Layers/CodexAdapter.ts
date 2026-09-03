@@ -2028,19 +2028,29 @@ export const mcpRuntimeOptionsForThread = (
   threadId: ThreadId,
   environment: NodeJS.ProcessEnv = process.env,
 ) => {
-  const mcpSession = McpProviderSession.readMcpProviderSessionIncludingExternal(threadId);
-  return mcpSession
+  const mcpSessions = McpProviderSession.readMcpProviderSessions(threadId);
+  return mcpSessions.length > 0
     ? {
         environment: {
           ...environment,
-          T3_MCP_BEARER_TOKEN: mcpSession.authorizationHeader.replace(/^Bearer\s+/, ""),
+          ...Object.fromEntries(
+            mcpSessions.map((mcpSession) => [
+              `T3_MCP_BEARER_TOKEN_${mcpSession.name.toUpperCase().replaceAll("-", "_")}`,
+              mcpSession.authorizationHeader.replace(/^Bearer\s+/, ""),
+            ]),
+          ),
         },
-        appServerArgs: [
-          "-c",
-          `mcp_servers.t3-code.url=${mcpSession.endpoint}`,
-          "-c",
-          'mcp_servers.t3-code.bearer_token_env_var="T3_MCP_BEARER_TOKEN"',
-        ],
+        appServerArgs: mcpSessions.flatMap((mcpSession) => {
+          const tokenEnvironmentVariable = `T3_MCP_BEARER_TOKEN_${mcpSession.name
+            .toUpperCase()
+            .replaceAll("-", "_")}`;
+          return [
+            "-c",
+            `mcp_servers.${mcpSession.name}.url=${mcpSession.endpoint}`,
+            "-c",
+            `mcp_servers.${mcpSession.name}.bearer_token_env_var="${tokenEnvironmentVariable}"`,
+          ];
+        }),
       }
     : undefined;
 };

@@ -860,29 +860,26 @@ const stopOpenCodeContext = Effect.fn("stopOpenCodeContext")(function* (
   return true;
 });
 
-export const openCodeMcpForThread = (threadId: ThreadId) => {
-  const mcpSession = McpProviderSession.readMcpProviderSessionIncludingExternal(threadId);
-  return mcpSession
-    ? {
-        name: "t3-code",
-        config: {
-          type: "remote" as const,
-          url: mcpSession.endpoint,
-          headers: { Authorization: mcpSession.authorizationHeader },
-          oauth: false as const,
-        },
-      }
-    : undefined;
-};
+export const openCodeMcpsForThread = (threadId: ThreadId) =>
+  McpProviderSession.readMcpProviderSessions(threadId).map((mcpSession) => ({
+    name: mcpSession.name,
+    config: {
+      type: "remote" as const,
+      url: mcpSession.endpoint,
+      headers: { Authorization: mcpSession.authorizationHeader },
+      oauth: false as const,
+    },
+  }));
 
 export const addOpenCodeMcpForThread = (
   threadId: ThreadId,
   serverIsExternal: boolean,
-  add: (input: NonNullable<ReturnType<typeof openCodeMcpForThread>>) => Promise<unknown>,
+  add: (input: ReturnType<typeof openCodeMcpsForThread>[number]) => Promise<unknown>,
 ) => {
   if (serverIsExternal) return Effect.void;
-  const mcp = openCodeMcpForThread(threadId);
-  return mcp ? runOpenCodeSdk("mcp.add", () => add(mcp)).pipe(Effect.asVoid) : Effect.void;
+  return Effect.forEach(openCodeMcpsForThread(threadId), (mcp) =>
+    runOpenCodeSdk("mcp.add", () => add(mcp)),
+  ).pipe(Effect.asVoid);
 };
 
 export function makeOpenCodeAdapter(

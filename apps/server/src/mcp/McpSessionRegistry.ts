@@ -138,6 +138,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
       });
       return {
         config: {
+          name: McpProviderSession.INTERNAL_MCP_SERVER_NAME,
           source: "internal",
           environmentId,
           threadId: scope.threadId,

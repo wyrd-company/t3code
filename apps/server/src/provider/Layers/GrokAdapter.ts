@@ -331,16 +331,14 @@ export function grokPromptSettlementBelongsToContext(input: {
 }
 
 const grokMcpServersForThread = (threadId: ThreadId) => {
-  const mcpSession = McpProviderSession.readMcpProviderSessionIncludingExternal(threadId);
-  return mcpSession
-    ? [
-        {
-          type: "http" as const,
-          name: "t3-code",
-          url: mcpSession.endpoint,
-          headers: [{ name: "Authorization", value: mcpSession.authorizationHeader }],
-        },
-      ]
+  const mcpSessions = McpProviderSession.readMcpProviderSessions(threadId);
+  return mcpSessions.length > 0
+    ? mcpSessions.map((mcpSession) => ({
+        type: "http" as const,
+        name: mcpSession.name,
+        url: mcpSession.endpoint,
+        headers: [{ name: "Authorization", value: mcpSession.authorizationHeader }],
+      }))
     : undefined;
 };
 

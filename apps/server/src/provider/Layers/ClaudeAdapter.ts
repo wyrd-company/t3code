@@ -4738,15 +4738,18 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   } satisfies ClaudeAdapterShape;
 });
 export const mcpServerForThread = (threadId: ThreadId) => {
-  const mcpSession = McpProviderSession.readMcpProviderSessionIncludingExternal(threadId);
-  return mcpSession
-    ? {
-        "t3-code": {
-          type: "http" as const,
-          url: mcpSession.endpoint,
-          headers: { Authorization: mcpSession.authorizationHeader },
-        },
-      }
+  const mcpSessions = McpProviderSession.readMcpProviderSessions(threadId);
+  return mcpSessions.length > 0
+    ? Object.fromEntries(
+        mcpSessions.map((mcpSession) => [
+          mcpSession.name,
+          {
+            type: "http" as const,
+            url: mcpSession.endpoint,
+            headers: { Authorization: mcpSession.authorizationHeader },
+          },
+        ]),
+      )
     : undefined;
 };
 
