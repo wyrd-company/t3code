@@ -261,9 +261,7 @@ it.effect("closes the loopback gateway on credential revocation", () =>
         scope: fixture.sessionScope,
       });
       yield* fixture.registry.revokeProviderSession(fixture.issued.config.providerSessionId);
-      const exit = yield* connectGateway(gateway.endpoint, gateway.authorizationHeader).pipe(
-        Effect.exit,
-      );
+      const exit = yield* Effect.tryPromise(() => fetch(gateway.endpoint)).pipe(Effect.exit);
       expect(Exit.isFailure(exit)).toBe(true);
     }),
   ),
