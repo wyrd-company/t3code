@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
-import { HttpServer } from "effect/unstable/http";
+import { FetchHttpClient, HttpClient, HttpServer } from "effect/unstable/http";
 
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import { startCursorMcpGateway } from "./CursorMcpGateway.ts";
@@ -261,7 +261,10 @@ it.effect("closes the loopback gateway on credential revocation", () =>
         scope: fixture.sessionScope,
       });
       yield* fixture.registry.revokeProviderSession(fixture.issued.config.providerSessionId);
-      const exit = yield* Effect.tryPromise(() => fetch(gateway.endpoint)).pipe(Effect.exit);
+      const exit = yield* HttpClient.get(gateway.endpoint).pipe(
+        Effect.provide(FetchHttpClient.layer),
+        Effect.exit,
+      );
       expect(Exit.isFailure(exit)).toBe(true);
     }),
   ),
