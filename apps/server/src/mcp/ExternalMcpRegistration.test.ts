@@ -15,11 +15,11 @@ import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
-import { mcpServerForThread } from "../provider/Layers/ClaudeAdapter.ts";
-import { mcpRuntimeOptionsForThread } from "../provider/Layers/CodexAdapter.ts";
-import { cursorMcpServersForThread } from "../provider/Layers/CursorAdapter.ts";
-import { grokMcpServersForThread } from "../provider/Layers/GrokAdapter.ts";
-import { openCodeMcpForThread } from "../provider/Layers/OpenCodeAdapter.ts";
+import { attachClaudeMcpForThread } from "../provider/Layers/ClaudeAdapter.ts";
+import { attachCodexMcpForThread } from "../provider/Layers/CodexAdapter.ts";
+import { attachCursorMcpForThread } from "../provider/Layers/CursorAdapter.ts";
+import { attachGrokMcpForThread } from "../provider/Layers/GrokAdapter.ts";
+import { addOpenCodeMcpForThread } from "../provider/Layers/OpenCodeAdapter.ts";
 import { EXTERNAL_MCP_REGISTRATION_PATH } from "./ExternalMcpRegistration.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpProviderSession from "./McpProviderSession.ts";
@@ -237,7 +237,7 @@ it.effect("rejects a blank external MCP thread ID", () =>
   ),
 );
 
-it.effect("registers, plumbs, and clears one external MCP session for every harness", () =>
+it.effect("registers and clears one external MCP session through the mounted server", () =>
   Effect.scoped(
     Effect.gen(function* () {
       McpProviderSession.clearAllMcpProviderSessions();
@@ -253,45 +253,6 @@ it.effect("registers, plumbs, and clears one external MCP session for every harn
         source: "external",
         browserToolsAvailable: false,
       });
-      expect(mcpServerForThread(threadId)).toEqual({
-        "t3-code": {
-          type: "http",
-          url: endpoint,
-          headers: { Authorization: authorizationHeader },
-        },
-      });
-      expect(mcpRuntimeOptionsForThread(threadId, { EXISTING: "kept" })).toEqual({
-        environment: {
-          EXISTING: "kept",
-          T3_MCP_BEARER_TOKEN: "token-alpha",
-        },
-        appServerArgs: [
-          "-c",
-          `mcp_servers.t3-code.url=${endpoint}`,
-          "-c",
-          'mcp_servers.t3-code.bearer_token_env_var="T3_MCP_BEARER_TOKEN"',
-        ],
-      });
-      const acpMcpServers = [
-        {
-          type: "http",
-          name: "t3-code",
-          url: endpoint,
-          headers: [{ name: "Authorization", value: authorizationHeader }],
-        },
-      ];
-      expect(cursorMcpServersForThread(threadId)).toEqual(acpMcpServers);
-      expect(grokMcpServersForThread(threadId)).toEqual(acpMcpServers);
-      expect(openCodeMcpForThread(threadId)).toEqual({
-        name: "t3-code",
-        config: {
-          type: "remote",
-          url: endpoint,
-          headers: { Authorization: authorizationHeader },
-          oauth: false,
-        },
-      });
-
       McpProviderSession.setExternalMcpProviderSession({
         threadId: alternateThreadId,
         endpoint: "https://service.example.test/other",
@@ -313,6 +274,101 @@ it.effect("registers, plumbs, and clears one external MCP session for every harn
       Layer.mergeAll(authLayer("operate"), NodeHttpServer.layerTest, NodeServices.layer),
     ),
   ),
+);
+
+const arrangeExternalRegistration = () => {
+  McpProviderSession.clearAllMcpProviderSessions();
+  McpProviderSession.setExternalMcpProviderSession({ threadId, endpoint, authorizationHeader });
+};
+
+it("attaches external MCP through the Claude Agent SDK query options", () => {
+  arrangeExternalRegistration();
+  expect(attachClaudeMcpForThread(threadId, { marker: "claude" })).toEqual({
+    marker: "claude",
+    mcpServers: {
+      "t3-code": {
+        type: "http",
+        url: endpoint,
+        headers: { Authorization: authorizationHeader },
+      },
+    },
+  });
+});
+
+it("attaches external MCP through the Codex session runtime options", () => {
+  arrangeExternalRegistration();
+  expect(attachCodexMcpForThread(threadId, { marker: "codex" }, { EXISTING: "kept" })).toEqual({
+    marker: "codex",
+    environment: {
+      EXISTING: "kept",
+      T3_MCP_BEARER_TOKEN: "token-alpha",
+    },
+    appServerArgs: [
+      "-c",
+      `mcp_servers.t3-code.url=${endpoint}`,
+      "-c",
+      'mcp_servers.t3-code.bearer_token_env_var="T3_MCP_BEARER_TOKEN"',
+    ],
+  });
+});
+
+const acpMcpServers = [
+  {
+    type: "http",
+    name: "t3-code",
+    url: endpoint,
+    headers: [{ name: "Authorization", value: authorizationHeader }],
+  },
+];
+
+it("attaches external MCP through the Cursor ACP runtime input", () => {
+  arrangeExternalRegistration();
+  expect(attachCursorMcpForThread(threadId, { marker: "cursor" })).toEqual({
+    marker: "cursor",
+    mcpServers: acpMcpServers,
+  });
+});
+
+it("attaches external MCP through the Grok ACP runtime input", () => {
+  arrangeExternalRegistration();
+  expect(attachGrokMcpForThread(threadId, { marker: "grok" })).toEqual({
+    marker: "grok",
+    mcpServers: acpMcpServers,
+  });
+});
+
+it.effect("attaches external MCP through the OpenCode SDK mcp.add call", () =>
+  Effect.gen(function* () {
+    arrangeExternalRegistration();
+    const added: Array<unknown> = [];
+    yield* addOpenCodeMcpForThread(threadId, false, (input) => {
+      added.push(input);
+      return Promise.resolve({});
+    });
+    expect(added).toEqual([
+      {
+        name: "t3-code",
+        config: {
+          type: "remote",
+          url: endpoint,
+          headers: { Authorization: authorizationHeader },
+          oauth: false,
+        },
+      },
+    ]);
+  }),
+);
+
+it.effect("skips external MCP installation for a shared external OpenCode server", () =>
+  Effect.gen(function* () {
+    arrangeExternalRegistration();
+    let addCalls = 0;
+    yield* addOpenCodeMcpForThread(threadId, true, () => {
+      addCalls += 1;
+      return Promise.resolve({});
+    });
+    expect(addCalls).toBe(0);
+  }),
 );
 
 it("keeps external registration when the internal credential path clears or replaces a thread", () => {

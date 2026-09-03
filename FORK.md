@@ -42,6 +42,8 @@ The diff from the base pin can contain any added file. Modifications are limited
 - `apps/server/src/provider/Layers/ClaudeAdapter.ts`
 - `apps/server/src/provider/Layers/CodexAdapter.ts`
 - `apps/server/src/provider/Layers/CursorAdapter.ts`
+- `apps/server/src/provider/Layers/GrokAdapter.ts`
+- `apps/server/src/provider/Layers/OpenCodeAdapter.ts`
 
 The executable source of this list is [.github/fork/allowlist.txt](.github/fork/allowlist.txt). Deletions, renames, copies, and modifications to any other upstream-authored file fail CI.
 
@@ -85,3 +87,8 @@ browser-automation tools are present.
 Cursor and Grok receive the endpoint as an ACP HTTP MCP server. OpenCode adds it
 as a remote MCP server through the SDK. These drivers receive no separate
 browser-availability signal from the registry.
+
+OpenCode installs per-thread MCP configuration only into a server process owned
+by that provider session. It does not install the endpoint into a configured
+external OpenCode server because that server can be shared across threads and
+would expose one thread's authorization header to other sessions.

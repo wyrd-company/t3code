@@ -4279,7 +4279,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ? { autoCompactWindow: Number(claudeSettings.autoCompactWindow) }
           : {}),
       };
-      const mcpServers = mcpServerForThread(input.threadId);
       // The attachments dir grant lets the agent Read/copy pasted images at
       // the paths ProviderService injects into the turn text, without an
       // approval prompt. It is a leaf directory holding only attachment
@@ -4288,7 +4287,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(input.cwd ? [input.cwd] : []),
         serverConfig.attachmentsDir,
       ];
-      const queryOptions: ClaudeQueryOptions = {
+      const queryOptions: ClaudeQueryOptions = attachClaudeMcpForThread(input.threadId, {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
         pathToClaudeCodeExecutable: claudeBinaryPath,
@@ -4315,8 +4314,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         env: claudeEnvironment,
         additionalDirectories,
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
-        ...(mcpServers ? { mcpServers } : {}),
-      };
+      });
 
       yield* Effect.annotateCurrentSpan({
         "provider.kind": PROVIDER,
@@ -4732,4 +4730,12 @@ export const mcpServerForThread = (threadId: ThreadId) => {
         },
       }
     : undefined;
+};
+
+export const attachClaudeMcpForThread = <Options extends object>(
+  threadId: ThreadId,
+  options: Options,
+) => {
+  const mcpServers = mcpServerForThread(threadId);
+  return mcpServers ? { ...options, mcpServers } : options;
 };
