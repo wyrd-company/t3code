@@ -27,6 +27,11 @@ import {
   ExternalMcpLiveWorkerProcessTree,
   type ExternalMcpLiveWorkerProcessHandle,
 } from "./ExternalMcpLiveWorkerProcessTree.ts";
+import {
+  EXTERNAL_MCP_LIVE_WORKER_UNSHARE,
+  externalMcpLiveWorkerSupervisorArgs,
+  readExternalMcpLiveWorkerSupervisorStatus,
+} from "./ExternalMcpLiveWorkerSupervisor.ts";
 
 export {
   EXTERNAL_MCP_LIVE_PROBE_ENV,
@@ -57,11 +62,6 @@ export interface RunExternalMcpLiveWorkerOptions {
 export interface ExternalMcpLiveWorkerDiscardedOutput {
   readonly stdoutBytes: number;
   readonly stderrBytes: number;
-}
-
-interface ChildExit {
-  readonly code: number | null;
-  readonly signal: NodeJS.Signals | null;
 }
 
 interface TerminationOutcome {
@@ -170,8 +170,9 @@ const assertPositiveMilliseconds = (name: string, value: number): void => {
 
 /**
  * Runs one live harness in one detached process group. Child output is drained
- * but never forwarded; the only accepted data channel is the private,
- * versioned result file.
+ * but never forwarded. Worker assertions use the private, versioned result
+ * file; lifecycle status uses a supervisor-only pipe that the worker does not
+ * inherit.
  */
 export async function runExternalMcpLiveWorker(
   options: RunExternalMcpLiveWorkerOptions,
@@ -183,21 +184,25 @@ export async function runExternalMcpLiveWorker(
     NodePath.join(NodeOS.tmpdir(), "t3-external-mcp-live-worker-"),
   );
   const resultFile = NodePath.join(resultDirectory, "result.ndjson");
-  let child: NodeChildProcess.ChildProcessByStdio<null, NodeStream.Readable, NodeStream.Readable>;
+  let child: NodeChildProcess.ChildProcess;
   try {
-    child = NodeChildProcess.spawn(options.command.executable, [...(options.command.args ?? [])], {
-      cwd: options.command.cwd,
-      detached: true,
-      env: {
-        ...process.env,
-        ...options.command.environment,
-        [EXTERNAL_MCP_LIVE_WORKER_PROTOCOL_ENV]: String(EXTERNAL_MCP_LIVE_WORKER_PROTOCOL),
-        [EXTERNAL_MCP_LIVE_WORKER_HARNESS_ENV]: options.harness,
-        [EXTERNAL_MCP_LIVE_WORKER_RESULT_FILE_ENV]: resultFile,
+    child = NodeChildProcess.spawn(
+      EXTERNAL_MCP_LIVE_WORKER_UNSHARE,
+      externalMcpLiveWorkerSupervisorArgs(options.command.executable, options.command.args ?? []),
+      {
+        cwd: options.command.cwd,
+        detached: true,
+        env: {
+          ...process.env,
+          ...options.command.environment,
+          [EXTERNAL_MCP_LIVE_WORKER_PROTOCOL_ENV]: String(EXTERNAL_MCP_LIVE_WORKER_PROTOCOL),
+          [EXTERNAL_MCP_LIVE_WORKER_HARNESS_ENV]: options.harness,
+          [EXTERNAL_MCP_LIVE_WORKER_RESULT_FILE_ENV]: resultFile,
+        },
+        shell: false,
+        stdio: ["ignore", "pipe", "pipe", "pipe"],
       },
-      shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    );
   } catch {
     NodeFS.rmSync(resultDirectory, { recursive: true, force: true });
     return failedResult(options.harness, "worker-spawn-failed", "spawn-failed");
@@ -205,15 +210,18 @@ export async function runExternalMcpLiveWorker(
 
   let stdoutBytes = 0;
   let stderrBytes = 0;
-  child.stdout.on("data", (chunk: Buffer | string) => {
+  child.stdout!.on("data", (chunk: Buffer | string) => {
     stdoutBytes += Buffer.byteLength(chunk);
   });
-  child.stderr.on("data", (chunk: Buffer | string) => {
+  child.stderr!.on("data", (chunk: Buffer | string) => {
     stderrBytes += Buffer.byteLength(chunk);
   });
 
-  const exitPromise = new Promise<ChildExit>((resolve, reject) => {
-    child.once("exit", (code, signal) => resolve({ code, signal }));
+  const supervisorStatusStream = child.stdio[3] as NodeStream.Readable | null;
+  const supervisorStatusPromise = readExternalMcpLiveWorkerSupervisorStatus(supervisorStatusStream);
+
+  const exitPromise = new Promise<void>((resolve, reject) => {
+    child.once("exit", () => resolve());
     child.once("error", () => reject(new Error("External MCP live worker failed to spawn.")));
   });
   const pid = child.pid;
@@ -228,8 +236,14 @@ export async function runExternalMcpLiveWorker(
   let deadline: NodeJS.Timeout | undefined;
   try {
     options.onSpawn?.(handle);
+    const leftDescendantsPromise = supervisorStatusPromise.then((status) =>
+      status?.kind === "exited" && status.leftDescendants
+        ? { kind: "left-descendants" as const, status }
+        : new Promise<never>(() => undefined),
+    );
     const first = await Promise.race([
-      exitPromise.then((exit) => ({ kind: "exit" as const, exit })),
+      exitPromise.then(() => ({ kind: "exit" as const })),
+      leftDescendantsPromise,
       new Promise<{ readonly kind: "deadline" }>((resolve) => {
         deadline = setTimeout(() => resolve({ kind: "deadline" }), options.deadlineMs);
       }),
@@ -265,6 +279,22 @@ export async function runExternalMcpLiveWorker(
       );
     }
 
+    if (first.kind === "left-descendants") {
+      const termination = await terminateProcessGroup(
+        processTree,
+        options.gracefulTerminationMs,
+        options.forcedTerminationMs,
+      );
+      const snapshot = decodeExternalMcpLiveWorkerResultFile(readResultFile(resultFile));
+      const reachedStage = snapshot.kind === "valid" ? snapshot.result.reachedStage : "setup";
+      return failedResult(
+        options.harness,
+        "worker-left-descendants",
+        termination.teardown,
+        reachedStage,
+      );
+    }
+
     if (processTree.hasLiveProcess()) {
       const termination = await terminateProcessGroup(
         processTree,
@@ -276,10 +306,14 @@ export async function runExternalMcpLiveWorker(
 
     const teardown = "exited-without-signal" as const;
     const snapshot = decodeExternalMcpLiveWorkerResultFile(readResultFile(resultFile));
-    if (first.exit.signal !== null) {
+    const supervisorStatus = await supervisorStatusPromise;
+    if (supervisorStatus === undefined || supervisorStatus.kind === "spawn-failed") {
+      return failedResult(options.harness, "worker-spawn-failed", "spawn-failed");
+    }
+    if (supervisorStatus.signal !== null) {
       return failedResult(options.harness, "worker-exited-by-signal", "exited-by-signal");
     }
-    if (first.exit.code !== 0) {
+    if (supervisorStatus.code !== 0) {
       const reachedStage = snapshot.kind === "valid" ? snapshot.result.reachedStage : "setup";
       return failedResult(options.harness, "worker-exited-nonzero", teardown, reachedStage);
     }
