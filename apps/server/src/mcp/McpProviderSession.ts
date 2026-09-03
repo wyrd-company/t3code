@@ -43,6 +43,10 @@ export function readMcpProviderSessionIncludingExternal(
   return sessionsByThread.get(threadId);
 }
 
+export function shouldPrepareInternalMcpProviderSession(threadId: ThreadId): boolean {
+  return sessionsByThread.get(threadId)?.source !== "external";
+}
+
 export function setExternalMcpProviderSession(
   config: Omit<ExternalMcpProviderSessionConfig, "source" | "browserToolsAvailable">,
 ): void {

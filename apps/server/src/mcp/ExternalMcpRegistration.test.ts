@@ -18,15 +18,16 @@ import { mcpRuntimeOptionsForThread } from "../provider/Layers/CodexAdapter.ts";
 import { EXTERNAL_MCP_REGISTRATION_PATH, layer } from "./ExternalMcpRegistration.ts";
 import * as McpProviderSession from "./McpProviderSession.ts";
 
-const threadId = ThreadId.make("thread-external-mcp-test");
-const endpoint = "https://mcp.example.test/session";
-const authorizationHeader = "Bearer external-mcp-test-token";
+const threadId = ThreadId.make("thread-alpha");
+const alternateThreadId = ThreadId.make("thread-beta");
+const endpoint = "https://service.example.test/api";
+const authorizationHeader = "Bearer token-alpha";
 
 const authenticatedSession = (
   scopes: EnvironmentAuth.AuthenticatedSession["scopes"],
 ): EnvironmentAuth.AuthenticatedSession => ({
-  sessionId: AuthSessionId.make("external-mcp-registration-test"),
-  subject: "external-mcp-registration-test",
+  sessionId: AuthSessionId.make("session-alpha"),
+  subject: "subject-alpha",
   method: "bearer-access-token",
   scopes,
 });
@@ -83,7 +84,7 @@ it.effect("rejects external MCP registration without orchestration operate scope
   ).pipe(Effect.provide(Layer.mergeAll(authLayer("read"), NodeHttpServer.layerTest))),
 );
 
-it.effect("rejects malformed external MCP registration without returning its secret", () =>
+it.effect("rejects a non-HTTP external MCP endpoint", () =>
   Effect.scoped(
     Effect.gen(function* () {
       McpProviderSession.clearAllMcpProviderSessions();
@@ -93,13 +94,48 @@ it.effect("rejects malformed external MCP registration without returning its sec
         body: HttpBody.jsonUnsafe({
           threadId,
           endpoint: "file:///tmp/not-http",
-          authorizationHeader: "secret-without-bearer-scheme",
+          authorizationHeader,
         }),
       });
       const body = yield* response.text;
 
       expect(response.status).toBe(400);
-      expect(body).not.toContain("secret-without-bearer-scheme");
+      expect(body).not.toContain(authorizationHeader);
+      expect(McpProviderSession.readMcpProviderSessionIncludingExternal(threadId)).toBeUndefined();
+    }),
+  ).pipe(Effect.provide(Layer.mergeAll(authLayer("operate"), NodeHttpServer.layerTest))),
+);
+
+it.effect("rejects a non-Bearer external MCP authorization header without returning it", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      McpProviderSession.clearAllMcpProviderSessions();
+      yield* serve.pipe(Layer.build);
+      const client = yield* HttpClient.HttpClient;
+      const secret = "secret-without-bearer-scheme";
+      const response = yield* client.put(EXTERNAL_MCP_REGISTRATION_PATH, {
+        body: HttpBody.jsonUnsafe({ threadId, endpoint, authorizationHeader: secret }),
+      });
+      const body = yield* response.text;
+
+      expect(response.status).toBe(400);
+      expect(body).not.toContain(secret);
+      expect(McpProviderSession.readMcpProviderSessionIncludingExternal(threadId)).toBeUndefined();
+    }),
+  ).pipe(Effect.provide(Layer.mergeAll(authLayer("operate"), NodeHttpServer.layerTest))),
+);
+
+it.effect("rejects a blank external MCP thread ID", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      McpProviderSession.clearAllMcpProviderSessions();
+      yield* serve.pipe(Layer.build);
+      const client = yield* HttpClient.HttpClient;
+      const response = yield* client.put(EXTERNAL_MCP_REGISTRATION_PATH, {
+        body: HttpBody.jsonUnsafe({ threadId: " ", endpoint, authorizationHeader }),
+      });
+
+      expect(response.status).toBe(400);
       expect(McpProviderSession.readMcpProviderSessionIncludingExternal(threadId)).toBeUndefined();
     }),
   ).pipe(Effect.provide(Layer.mergeAll(authLayer("operate"), NodeHttpServer.layerTest))),
@@ -128,7 +164,7 @@ it.effect("registers, plumbs, and clears one external MCP session for Claude and
         browserToolsAvailable: false,
         environment: {
           EXISTING: "kept",
-          T3_MCP_BEARER_TOKEN: "external-mcp-test-token",
+          T3_MCP_BEARER_TOKEN: "token-alpha",
         },
         appServerArgs: [
           "-c",
@@ -138,11 +174,21 @@ it.effect("registers, plumbs, and clears one external MCP session for Claude and
         ],
       });
 
+      McpProviderSession.setExternalMcpProviderSession({
+        threadId: alternateThreadId,
+        endpoint: "https://service.example.test/other",
+        authorizationHeader: "Bearer token-beta",
+      });
+
       const clear = yield* client.del(EXTERNAL_MCP_REGISTRATION_PATH, {
         body: HttpBody.jsonUnsafe({ threadId }),
       });
       expect(clear.status).toBe(204);
       expect(McpProviderSession.readMcpProviderSessionIncludingExternal(threadId)).toBeUndefined();
+      expect(
+        McpProviderSession.readMcpProviderSessionIncludingExternal(alternateThreadId)?.threadId,
+      ).toBe(alternateThreadId);
+      McpProviderSession.clearAllMcpProviderSessions();
     }),
   ).pipe(Effect.provide(Layer.mergeAll(authLayer("operate"), NodeHttpServer.layerTest))),
 );
@@ -150,15 +196,16 @@ it.effect("registers, plumbs, and clears one external MCP session for Claude and
 it("keeps external registration when the internal credential path clears or replaces a thread", () => {
   McpProviderSession.clearAllMcpProviderSessions();
   McpProviderSession.setExternalMcpProviderSession({ threadId, endpoint, authorizationHeader });
+  expect(McpProviderSession.shouldPrepareInternalMcpProviderSession(threadId)).toBe(false);
 
   McpProviderSession.setMcpProviderSession({
     source: "internal",
-    environmentId: EnvironmentId.make("environment-external-mcp-test"),
+    environmentId: EnvironmentId.make("environment-alpha"),
     threadId,
-    providerSessionId: "provider-session-external-mcp-test",
+    providerSessionId: "provider-session-alpha",
     providerInstanceId: ProviderInstanceId.make("codex"),
-    endpoint: "http://127.0.0.1/internal-mcp",
-    authorizationHeader: "Bearer internal-mcp-token",
+    endpoint: "http://127.0.0.1/service",
+    authorizationHeader: "Bearer token-beta",
     browserToolsAvailable: true,
   });
   McpProviderSession.clearInternalMcpProviderSession(threadId);
