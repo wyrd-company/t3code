@@ -44,6 +44,8 @@ The diff from the base pin can contain any added file. Modifications are limited
 - `apps/server/src/provider/Layers/CursorAdapter.ts`
 - `apps/server/src/provider/Layers/GrokAdapter.ts`
 - `apps/server/src/provider/Layers/OpenCodeAdapter.ts`
+- `apps/server/package.json`
+- `pnpm-lock.yaml`
 
 The executable source of this list is [.github/fork/allowlist.txt](.github/fork/allowlist.txt). Deletions, renames, copies, and modifications to any other upstream-authored file fail CI.
 
@@ -51,7 +53,7 @@ The executable source of this list is [.github/fork/allowlist.txt](.github/fork/
 
 Server tags use `server/<upstream-version>-wyrd.<release>`, for example `server/0.0.37-wyrd.1`. This namespace cannot match upstream's `v*.*.*` release trigger. A tag builds the server and Linux x64 resource monitor, packs `t3-<version>.tgz`, and publishes it as a public GitHub Release asset. The tarball bundles a Linux x64 `node-pty` prebuild produced on Debian so installation does not require Python or a C++ toolchain.
 
-The build temporarily changes the package version in the runner worktree so that `t3 --version` reports the fork version. The build restores `apps/server/package.json` before publication; the fork carries no committed edit to that upstream file.
+The branch declares `@modelcontextprotocol/sdk` directly in `apps/server/package.json` for Cursor's outbound gateway clients. The build temporarily changes only the package version in the runner worktree so that `t3 --version` reports the fork version, then restores the committed manifest before publication.
 
 The public client configuration is derived from the upstream package version in [.github/fork/upstream-version](.github/fork/upstream-version), which corresponds to the base pin. The release base version must match this record. The release build extracts the relay, Clerk, and relay client OTLP traces values from that exact public npm package and verifies the built bundle matches them. This deliberately reproduces upstream's complete telemetry configuration, including its public traces token.
 
@@ -74,11 +76,14 @@ header. The reserved internal name `t3-code` cannot be registered externally.
 An external registration is additive to T3's internal browser-tool MCP entry
 for that thread. Registering or clearing an external entry does not rotate,
 replace, revoke, or suppress the internal credential. External endpoints reach
-Claude Agent, Codex, Cursor, Grok, and OpenCode alongside the internal `t3-code`
-entry through each driver's existing native MCP configuration. Callers must
-register before starting the provider session. The new external configuration
-attaches only when the provider session next starts. Clearing an external
-registration does not reconfigure a running session.
+Claude Agent, Codex, Grok, and OpenCode alongside the internal `t3-code` entry
+through each driver's existing native MCP configuration. Cursor receives one
+`t3-code` loopback entry backed by a provider-session-scoped gateway that
+snapshots and connects all entries, rejects raw tool-name collisions, and routes
+each call to its owning downstream without exposing an external Bearer to Cursor.
+Callers must register before starting the provider session. The new external
+configuration attaches only when the provider session next starts. Clearing an
+external registration does not reconfigure a running session.
 
 External registrations record browser-tools availability as false. Thread-level
 browser-tools availability is true only while the internal `t3-code` entry is
@@ -86,9 +91,11 @@ present. Codex carries that value into its developer instructions instead of
 inferring browser-tool availability from the presence of any MCP server. Claude
 Agent receives no separate browser-availability signal.
 
-Cursor and Grok receive the endpoint as an ACP HTTP MCP server. OpenCode adds it
-as a remote MCP server through the SDK. These drivers receive no separate
-browser-availability signal from the registry.
+Grok receives each endpoint as an ACP HTTP MCP server. OpenCode adds each
+endpoint as a remote MCP server through the SDK. Cursor's loopback gateway is
+authenticated by the existing internal provider credential and closes its
+downstream clients on provider stop or credential revocation. These drivers
+receive no separate browser-availability signal from the registry.
 
 OpenCode installs per-thread MCP configuration only into a server process owned
 by that provider session. It does not install the endpoint into a configured

@@ -42,6 +42,7 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import * as CursorMcpGateway from "../../mcp/CursorMcpGateway.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import {
   ProviderAdapterProcessError,
@@ -112,6 +113,7 @@ export interface CursorAdapterLiveOptions {
    */
   readonly resolveSettings?: Effect.Effect<CursorSettings>;
   readonly makeRuntime?: typeof makeCursorAcpRuntime;
+  readonly makeMcpGateway?: typeof CursorMcpGateway.startCursorMcpGateway;
 }
 
 interface PendingApproval {
@@ -311,25 +313,39 @@ function selectAutoApprovedPermissionOption(
   return undefined;
 }
 
-const cursorMcpServersForThread = (threadId: ThreadId) => {
+const cursorMcpServersForThread = Effect.fn("CursorAdapter.mcpServersForThread")(function* (
+  threadId: ThreadId,
+  scope: Scope.Closeable,
+  makeGateway?: typeof CursorMcpGateway.startCursorMcpGateway,
+) {
   const mcpSessions = McpProviderSession.readMcpProviderSessions(threadId);
-  return mcpSessions.length > 0
-    ? mcpSessions.map((mcpSession) => ({
-        type: "http" as const,
-        name: mcpSession.name,
-        url: mcpSession.endpoint,
-        headers: [{ name: "Authorization", value: mcpSession.authorizationHeader }],
-      }))
-    : undefined;
-};
+  if (mcpSessions.length === 0) return undefined;
+  const effectiveSessions =
+    mcpSessions.length > 1
+      ? [
+          yield* (makeGateway ?? CursorMcpGateway.startCursorMcpGateway)({
+            sessions: mcpSessions,
+            scope,
+          }),
+        ]
+      : mcpSessions;
+  return effectiveSessions.map((mcpSession) => ({
+    type: "http" as const,
+    name: mcpSession.name,
+    url: mcpSession.endpoint,
+    headers: [{ name: "Authorization", value: mcpSession.authorizationHeader }],
+  }));
+});
 
 export const attachCursorMcpForThread = <Options extends object>(
   threadId: ThreadId,
   options: Options,
-) => {
-  const mcpServers = cursorMcpServersForThread(threadId);
-  return mcpServers ? { ...options, mcpServers } : options;
-};
+  scope: Scope.Closeable,
+  makeGateway?: typeof CursorMcpGateway.startCursorMcpGateway,
+) =>
+  cursorMcpServersForThread(threadId, scope, makeGateway).pipe(
+    Effect.map((mcpServers) => (mcpServers ? { ...options, mcpServers } : options)),
+  );
 
 export function makeCursorAdapter(
   cursorSettings: CursorSettings,
@@ -471,7 +487,10 @@ export function makeCursorAdapter(
       const ctx = sessions.get(threadId);
       if (!ctx || ctx.stopped) {
         return Effect.fail(
-          new ProviderAdapterSessionNotFoundError({ provider: PROVIDER, threadId }),
+          new ProviderAdapterSessionNotFoundError({
+            provider: PROVIDER,
+            threadId,
+          }),
         );
       }
       return Effect.succeed(ctx);
@@ -552,8 +571,9 @@ export function makeCursorAdapter(
             ? yield* options.resolveSettings
             : cursorSettings;
 
-          const acp = yield* (options?.makeRuntime ?? makeCursorAcpRuntime)(
-            attachCursorMcpForThread(input.threadId, {
+          const runtimeInput = yield* attachCursorMcpForThread(
+            input.threadId,
+            {
               cursorSettings: effectiveCursorSettings,
               ...(options?.environment ? { environment: options.environment } : {}),
               childProcessSpawner,
@@ -561,8 +581,21 @@ export function makeCursorAdapter(
               ...(resumeSessionId ? { resumeSessionId } : {}),
               clientInfo: { name: "t3-code", version: "0.0.0" },
               ...acpNativeLoggers,
-            }),
+            },
+            sessionScope,
+            options?.makeMcpGateway,
           ).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderAdapterProcessError({
+                  provider: PROVIDER,
+                  threadId: input.threadId,
+                  detail: cause.message,
+                  cause,
+                }),
+            ),
+          );
+          const acp = yield* (options?.makeRuntime ?? makeCursorAcpRuntime)(runtimeInput).pipe(
             Effect.provideService(Crypto.Crypto, crypto),
             Effect.provideService(Scope.Scope, sessionScope),
             Effect.mapError(
@@ -1034,7 +1067,10 @@ export function makeCursorAdapter(
           if (turnRecord) {
             turnRecord.items.push({ prompt: promptParts, result });
           } else {
-            ctx.turns.push({ id: turnId, items: [{ prompt: promptParts, result }] });
+            ctx.turns.push({
+              id: turnId,
+              items: [{ prompt: promptParts, result }],
+            });
           }
           ctx.session = {
             ...ctx.session,
@@ -1167,9 +1203,13 @@ export function makeCursorAdapter(
       Effect.forEach(sessions.values(), stopSessionInternal, { discard: true });
 
     yield* Effect.addFinalizer(() =>
-      Effect.forEach(sessions.values(), stopSessionInternal, { discard: true }).pipe(
+      Effect.forEach(sessions.values(), stopSessionInternal, {
+        discard: true,
+      }).pipe(
         Effect.catch((cause) =>
-          Effect.logError("Failed to emit Cursor session shutdown event.", { cause }),
+          Effect.logError("Failed to emit Cursor session shutdown event.", {
+            cause,
+          }),
         ),
         Effect.tap(() => PubSub.shutdown(runtimeEventPubSub)),
         Effect.tap(() => managedNativeEventLogger?.close() ?? Effect.void),

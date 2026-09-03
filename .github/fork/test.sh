@@ -70,6 +70,15 @@ if ! grep --fixed-strings --line-regexp --quiet -- "$codex_runtime_path" \
 fi
 echo "PASS allowlist-covers-codex-browser-tool-signal"
 
+for mcp_dependency_file in apps/server/package.json pnpm-lock.yaml; do
+  if ! grep --fixed-strings --line-regexp --quiet -- "$mcp_dependency_file" \
+    "${repo_root}/.github/fork/allowlist.txt"; then
+    echo "FAIL allowlist-covers-mcp-sdk-dependency: missing ${mcp_dependency_file}" >&2
+    exit 1
+  fi
+done
+echo "PASS allowlist-covers-mcp-sdk-dependency"
+
 allowlist_repo="${fixture_root}/allowlist"
 mkdir -p "${allowlist_repo}/.github/fork" "${allowlist_repo}/apps/server/src/mcp"
 git -C "$allowlist_repo" init --quiet
