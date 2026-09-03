@@ -23,6 +23,24 @@ const recordSignal = (signal) => {
   if (signalFile !== undefined) NodeFS.appendFileSync(signalFile, `${signal}\n`);
 };
 const stayAlive = () => setInterval(() => undefined, 1_000);
+const hostPidForDirectChild = (namespacePid) => {
+  for (const task of NodeFS.readdirSync("/proc/self/task", { withFileTypes: true })) {
+    if (!task.isDirectory()) continue;
+    const children = NodeFS.readFileSync(`/proc/self/task/${task.name}/children`, "utf8")
+      .trim()
+      .split(/\s+/u)
+      .filter((value) => value !== "");
+    for (const hostPid of children) {
+      const status = NodeFS.readFileSync(`/proc/${hostPid}/status`, "utf8");
+      const namespacePids = status
+        .match(/^NSpid:\s+(.+)$/mu)?.[1]
+        ?.trim()
+        .split(/\s+/u);
+      if (namespacePids?.at(-1) === String(namespacePid)) return Number(hostPid);
+    }
+  }
+  throw new Error("Fixture descendant was not present in the exact parent-child relation.");
+};
 
 switch (mode) {
   case "success":
@@ -60,7 +78,7 @@ switch (mode) {
       ["-e", "process.on('SIGTERM', () => {}); setInterval(() => undefined, 1000);"],
       { detached: true, stdio: "ignore" },
     );
-    NodeFS.writeFileSync(descendantPidFile, String(descendant.pid));
+    NodeFS.writeFileSync(descendantPidFile, String(hostPidForDirectChild(descendant.pid)));
     write(result({ status: "failed", reachedStage: "turn", reason: "stage-timed-out" }));
     process.on("SIGTERM", () => process.exit(0));
     stayAlive();
@@ -88,7 +106,7 @@ switch (mode) {
       { detached: true, stdio: "ignore" },
     );
     descendant.unref();
-    NodeFS.writeFileSync(descendantPidFile, String(descendant.pid));
+    NodeFS.writeFileSync(descendantPidFile, String(hostPidForDirectChild(descendant.pid)));
     write(result());
     process.exit(0);
     break;

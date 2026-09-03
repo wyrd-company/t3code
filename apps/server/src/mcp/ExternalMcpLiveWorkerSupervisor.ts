@@ -30,7 +30,6 @@ export const externalMcpLiveWorkerSupervisorArgs = (
   "--map-current-user",
   "--pid",
   "--fork",
-  "--mount-proc",
   "--",
   process.execPath,
   supervisorPath,
