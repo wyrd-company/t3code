@@ -310,6 +310,20 @@ function selectAutoApprovedPermissionOption(
   return undefined;
 }
 
+export const cursorMcpServersForThread = (threadId: ThreadId) => {
+  const mcpSession = McpProviderSession.readMcpProviderSessionIncludingExternal(threadId);
+  return mcpSession
+    ? [
+        {
+          type: "http" as const,
+          name: "t3-code",
+          url: mcpSession.endpoint,
+          headers: [{ name: "Authorization", value: mcpSession.authorizationHeader }],
+        },
+      ]
+    : undefined;
+};
+
 export function makeCursorAdapter(
   cursorSettings: CursorSettings,
   options?: CursorAdapterLiveOptions,
@@ -531,7 +545,7 @@ export function makeCursorAdapter(
             ? yield* options.resolveSettings
             : cursorSettings;
 
-          const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+          const mcpServers = cursorMcpServersForThread(input.threadId);
           const acp = yield* makeCursorAcpRuntime({
             cursorSettings: effectiveCursorSettings,
             ...(options?.environment ? { environment: options.environment } : {}),
@@ -539,23 +553,7 @@ export function makeCursorAdapter(
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),
             clientInfo: { name: "t3-code", version: "0.0.0" },
-            ...(mcpSession
-              ? {
-                  mcpServers: [
-                    {
-                      type: "http" as const,
-                      name: "t3-code",
-                      url: mcpSession.endpoint,
-                      headers: [
-                        {
-                          name: "Authorization",
-                          value: mcpSession.authorizationHeader,
-                        },
-                      ],
-                    },
-                  ],
-                }
-              : {}),
+            ...(mcpServers ? { mcpServers } : {}),
             ...acpNativeLoggers,
           }).pipe(
             Effect.provideService(Crypto.Crypto, crypto),
