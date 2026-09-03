@@ -43,10 +43,6 @@ export function readMcpProviderSessionIncludingExternal(
   return sessionsByThread.get(threadId);
 }
 
-export function shouldPrepareInternalMcpProviderSession(threadId: ThreadId): boolean {
-  return sessionsByThread.get(threadId)?.source !== "external";
-}
-
 export function setExternalMcpProviderSession(
   config: Omit<ExternalMcpProviderSessionConfig, "source" | "browserToolsAvailable">,
 ): void {
@@ -71,7 +67,7 @@ export function clearExternalMcpProviderSession(threadId: ThreadId): void {
 }
 
 export function clearMcpProviderSession(threadId: ThreadId): void {
-  sessionsByThread.delete(threadId);
+  clearInternalMcpProviderSession(threadId);
 }
 
 export function clearAllMcpProviderSessions(): void {
