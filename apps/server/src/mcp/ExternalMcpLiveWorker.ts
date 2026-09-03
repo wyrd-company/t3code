@@ -65,7 +65,6 @@ interface ChildExit {
 }
 
 interface TerminationOutcome {
-  readonly exit: ChildExit;
   readonly teardown: "exited-without-signal" | "terminated-gracefully" | "terminated-forcibly";
 }
 
@@ -138,13 +137,12 @@ const resultFromSnapshot = (
 
 const terminateProcessGroup = async (
   tree: ExternalMcpLiveWorkerProcessTree,
-  exitPromise: Promise<ChildExit>,
   gracefulTerminationMs: number,
   forcedTerminationMs: number,
 ): Promise<TerminationOutcome> => {
   const gracefullySignaledGroups = new Set<number>();
   if (!tree.signal("SIGTERM", gracefullySignaledGroups)) {
-    return { exit: await exitPromise, teardown: "exited-without-signal" };
+    return { teardown: "exited-without-signal" };
   }
   const graceful = await waitForProcessTreeExit(
     tree,
@@ -153,7 +151,7 @@ const terminateProcessGroup = async (
     gracefullySignaledGroups,
   );
   if (graceful) {
-    return { exit: await exitPromise, teardown: "terminated-gracefully" };
+    return { teardown: "terminated-gracefully" };
   }
 
   tree.signal("SIGKILL");
@@ -161,7 +159,7 @@ const terminateProcessGroup = async (
   if (!forced) {
     throw new Error("External MCP live worker did not exit after forced termination.");
   }
-  return { exit: await exitPromise, teardown: "terminated-forcibly" };
+  return { teardown: "terminated-forcibly" };
 };
 
 const assertPositiveMilliseconds = (name: string, value: number): void => {
@@ -242,7 +240,6 @@ export async function runExternalMcpLiveWorker(
       const timelySnapshot = decodeExternalMcpLiveWorkerResultFile(timelyContent);
       const termination = await terminateProcessGroup(
         processTree,
-        exitPromise,
         options.gracefulTerminationMs,
         options.forcedTerminationMs,
       );
@@ -271,7 +268,6 @@ export async function runExternalMcpLiveWorker(
     if (processTree.hasLiveProcess()) {
       const termination = await terminateProcessGroup(
         processTree,
-        exitPromise,
         options.gracefulTerminationMs,
         options.forcedTerminationMs,
       );
@@ -292,7 +288,6 @@ export async function runExternalMcpLiveWorker(
     if (processTree.hasLiveProcess()) {
       await terminateProcessGroup(
         processTree,
-        exitPromise,
         options.gracefulTerminationMs,
         options.forcedTerminationMs,
       );
