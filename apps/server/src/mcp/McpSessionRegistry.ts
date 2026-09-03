@@ -17,7 +17,7 @@ export interface McpCredentialRequest {
 }
 
 export interface McpIssuedCredential {
-  readonly config: McpProviderSession.McpProviderSessionConfig;
+  readonly config: McpProviderSession.InternalMcpProviderSessionConfig;
 }
 
 export interface McpSessionRegistryShape {
@@ -138,12 +138,14 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
       });
       return {
         config: {
+          source: "internal",
           environmentId,
           threadId: scope.threadId,
           providerSessionId,
           providerInstanceId: scope.providerInstanceId,
           endpoint,
           authorizationHeader: `Bearer ${rawToken}`,
+          browserToolsAvailable: true,
         },
       };
     },

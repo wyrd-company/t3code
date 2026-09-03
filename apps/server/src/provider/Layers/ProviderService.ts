@@ -261,6 +261,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
   const prepareMcpSession = (threadId: ThreadId, providerInstanceId: ProviderInstanceId) =>
     Effect.gen(function* () {
+      const registered = McpProviderSession.readMcpProviderSessionIncludingExternal(threadId);
+      if (registered?.source === "external") {
+        return undefined;
+      }
       if (!(yield* agentBrowserAccessEnabled)) {
         // Revoke as well as clear. Every other prepare path reaches
         // `issueActiveMcpCredential`, which revokes the thread first, so
@@ -269,7 +273,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         // would keep refreshing it. A session restart (runtime mode, cwd,
         // model) re-prepares without stopping, so it relies on this.
         yield* revokeMcpCredential(threadId);
-        yield* Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId));
+        yield* Effect.sync(() => McpProviderSession.clearInternalMcpProviderSession(threadId));
         return undefined;
       }
       const credential = yield* issueMcpCredential({ threadId, providerInstanceId });
@@ -280,7 +284,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     });
   const clearMcpSession = (threadId: ThreadId) =>
     McpSessionRegistry.revokeActiveMcpThread(threadId).pipe(
-      Effect.tap(() => Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId))),
+      Effect.tap(() =>
+        Effect.sync(() => McpProviderSession.clearInternalMcpProviderSession(threadId)),
+      ),
     );
 
   const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
