@@ -242,7 +242,7 @@ it.effect("rejects whitespace, CRLF, and oversized Bearer authorization tokens",
   ),
 );
 
-it.effect("registering external MCP immediately revokes the active internal credential", () =>
+it.effect("registering external MCP preserves the active internal credential", () =>
   Effect.scoped(
     Effect.gen(function* () {
       McpProviderSession.clearAllMcpProviderSessions();
@@ -255,6 +255,7 @@ it.effect("registering external MCP immediately revokes the active internal cred
       const rawToken = issued?.config.authorizationHeader.slice("Bearer ".length);
       expect(rawToken).toBeDefined();
       expect(yield* registry.resolve(rawToken!)).toMatchObject({ threadId });
+      McpProviderSession.setMcpProviderSession(issued!.config);
 
       const client = yield* HttpClient.HttpClient;
       const response = yield* client.put(EXTERNAL_MCP_REGISTRATION_PATH, {
@@ -262,7 +263,11 @@ it.effect("registering external MCP immediately revokes the active internal cred
       });
 
       expect(response.status).toBe(204);
-      expect(yield* registry.resolve(rawToken!)).toBeUndefined();
+      expect(yield* registry.resolve(rawToken!)).toMatchObject({ threadId });
+      expect(McpProviderSession.readMcpProviderSessions(threadId).map(({ name }) => name)).toEqual([
+        "t3-code",
+        "external",
+      ]);
     }),
   ).pipe(
     Effect.provide(
@@ -295,6 +300,77 @@ it.effect("rejects a blank external MCP thread ID", () =>
   ),
 );
 
+it.effect("rejects an external MCP name collision with the internal t3-code entry", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      McpProviderSession.clearAllMcpProviderSessions();
+      yield* serve.pipe(Layer.build);
+      const client = yield* HttpClient.HttpClient;
+      const response = yield* client.put(EXTERNAL_MCP_REGISTRATION_PATH, {
+        body: HttpBody.jsonUnsafe({
+          name: "t3-code",
+          threadId,
+          endpoint,
+          authorizationHeader,
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      expect(McpProviderSession.readMcpProviderSessions(threadId)).toEqual([]);
+    }),
+  ).pipe(
+    Effect.provide(
+      Layer.mergeAll(authLayer("operate"), NodeHttpServer.layerTest, NodeServices.layer),
+    ),
+  ),
+);
+
+it.effect("clears only the named external MCP entry and preserves the internal entry", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      McpProviderSession.clearAllMcpProviderSessions();
+      McpProviderSession.setMcpProviderSession({
+        source: "internal",
+        environmentId: EnvironmentId.make("environment-alpha"),
+        threadId,
+        providerSessionId: "provider-session-alpha",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        endpoint: "http://127.0.0.1/internal",
+        authorizationHeader: "Bearer token-internal",
+        browserToolsAvailable: true,
+      });
+      McpProviderSession.setExternalMcpProviderSession({
+        name: "workflow-one",
+        threadId,
+        endpoint,
+        authorizationHeader,
+      });
+      McpProviderSession.setExternalMcpProviderSession({
+        name: "workflow-two",
+        threadId,
+        endpoint: "https://service.example.test/other",
+        authorizationHeader: "Bearer token-other",
+      });
+      yield* serve.pipe(Layer.build);
+      const client = yield* HttpClient.HttpClient;
+      const response = yield* client.del(EXTERNAL_MCP_REGISTRATION_PATH, {
+        body: HttpBody.jsonUnsafe({ threadId, name: "workflow-one" }),
+      });
+
+      expect(response.status).toBe(204);
+      expect(McpProviderSession.readMcpProviderSessions(threadId).map(({ name }) => name)).toEqual([
+        "t3-code",
+        "workflow-two",
+      ]);
+      expect(McpProviderSession.hasInternalMcpProviderSession(threadId)).toBe(true);
+    }),
+  ).pipe(
+    Effect.provide(
+      Layer.mergeAll(authLayer("operate"), NodeHttpServer.layerTest, NodeServices.layer),
+    ),
+  ),
+);
+
 it.effect("registers and clears one external MCP session through the mounted server", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -309,6 +385,7 @@ it.effect("registers and clears one external MCP session through the mounted ser
       expect(McpProviderSession.readMcpProviderSession(threadId)).toBeUndefined();
       expect(McpProviderSession.readMcpProviderSessionIncludingExternal(threadId)).toMatchObject({
         source: "external",
+        name: "external",
         browserToolsAvailable: false,
       });
       McpProviderSession.setExternalMcpProviderSession({
@@ -344,7 +421,7 @@ it("attaches external MCP through the Claude Agent SDK query options", () => {
   expect(attachClaudeMcpForThread(threadId, { marker: "claude" })).toEqual({
     marker: "claude",
     mcpServers: {
-      "t3-code": {
+      external: {
         type: "http",
         url: endpoint,
         headers: { Authorization: authorizationHeader },
@@ -359,13 +436,13 @@ it("attaches external MCP through the Codex session runtime options", () => {
     marker: "codex",
     environment: {
       EXISTING: "kept",
-      T3_MCP_BEARER_TOKEN: "token-alpha",
+      T3_MCP_BEARER_TOKEN_EXTERNAL: "token-alpha",
     },
     appServerArgs: [
       "-c",
-      `mcp_servers.t3-code.url=${endpoint}`,
+      `mcp_servers.external.url=${endpoint}`,
       "-c",
-      'mcp_servers.t3-code.bearer_token_env_var="T3_MCP_BEARER_TOKEN"',
+      'mcp_servers.external.bearer_token_env_var="T3_MCP_BEARER_TOKEN_EXTERNAL"',
     ],
   });
 });
@@ -373,7 +450,7 @@ it("attaches external MCP through the Codex session runtime options", () => {
 const acpMcpServers = [
   {
     type: "http",
-    name: "t3-code",
+    name: "external",
     url: endpoint,
     headers: [{ name: "Authorization", value: authorizationHeader }],
   },
@@ -405,7 +482,7 @@ it.effect("attaches external MCP through the OpenCode SDK mcp.add call", () =>
     });
     expect(added).toEqual([
       {
-        name: "t3-code",
+        name: "external",
         config: {
           type: "remote",
           url: endpoint,
@@ -429,7 +506,7 @@ it.effect("skips external MCP installation for a shared external OpenCode server
   }),
 );
 
-it("keeps external registration when the internal credential path clears or replaces a thread", () => {
+it("keeps internal and external MCP entries additive in either registration order", () => {
   McpProviderSession.clearAllMcpProviderSessions();
   McpProviderSession.setExternalMcpProviderSession({
     threadId,
@@ -447,8 +524,30 @@ it("keeps external registration when the internal credential path clears or repl
     authorizationHeader: "Bearer token-beta",
     browserToolsAvailable: true,
   });
-  McpProviderSession.clearMcpProviderSession(threadId);
-  expect(McpProviderSession.readMcpProviderSessionIncludingExternal(threadId)?.source).toBe(
+  expect(McpProviderSession.readMcpProviderSessions(threadId).map(({ name }) => name)).toEqual([
     "external",
-  );
+    "t3-code",
+  ]);
+
+  McpProviderSession.clearAllMcpProviderSessions();
+  McpProviderSession.setMcpProviderSession({
+    source: "internal",
+    environmentId: EnvironmentId.make("environment-alpha"),
+    threadId,
+    providerSessionId: "provider-session-alpha",
+    providerInstanceId: ProviderInstanceId.make("codex"),
+    endpoint: "http://127.0.0.1/service",
+    authorizationHeader: "Bearer token-beta",
+    browserToolsAvailable: true,
+  });
+  McpProviderSession.setExternalMcpProviderSession({ threadId, endpoint, authorizationHeader });
+  expect(McpProviderSession.readMcpProviderSessions(threadId).map(({ name }) => name)).toEqual([
+    "t3-code",
+    "external",
+  ]);
+
+  McpProviderSession.clearMcpProviderSession(threadId);
+  expect(McpProviderSession.readMcpProviderSessions(threadId).map(({ name }) => name)).toEqual([
+    "external",
+  ]);
 });
