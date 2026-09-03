@@ -2730,20 +2730,30 @@ export const mcpRuntimeOptionsForThread = (
   threadId: ThreadId,
   environment: NodeJS.ProcessEnv = process.env,
 ) => {
-  const mcpSession = McpProviderSession.readMcpProviderSessionIncludingExternal(threadId);
-  const internalSession = mcpSession?.source === "internal" ? mcpSession : undefined;
-  return mcpSession
+  const mcpSessions = McpProviderSession.readMcpProviderSessions(threadId);
+  const internalSession = McpProviderSession.readMcpProviderSession(threadId);
+  return mcpSessions.length > 0
     ? {
         environment: {
           ...McpProviderSession.withAgentDeviceEnvironment(environment, internalSession),
-          T3_MCP_BEARER_TOKEN: mcpSession.authorizationHeader.replace(/^Bearer\s+/, ""),
+          ...Object.fromEntries(
+            mcpSessions.map((mcpSession) => [
+              `T3_MCP_BEARER_TOKEN_${mcpSession.name.toUpperCase().replaceAll("-", "_")}`,
+              mcpSession.authorizationHeader.replace(/^Bearer\s+/, ""),
+            ]),
+          ),
         },
-        appServerArgs: [
-          "-c",
-          `mcp_servers.t3-code.url=${mcpSession.endpoint}`,
-          "-c",
-          'mcp_servers.t3-code.bearer_token_env_var="T3_MCP_BEARER_TOKEN"',
-        ],
+        appServerArgs: mcpSessions.flatMap((mcpSession) => {
+          const tokenEnvironmentVariable = `T3_MCP_BEARER_TOKEN_${mcpSession.name
+            .toUpperCase()
+            .replaceAll("-", "_")}`;
+          return [
+            "-c",
+            `mcp_servers.${mcpSession.name}.url=${mcpSession.endpoint}`,
+            "-c",
+            `mcp_servers.${mcpSession.name}.bearer_token_env_var="${tokenEnvironmentVariable}"`,
+          ];
+        }),
         ...(internalSession?.capabilities
           ? { mcpCapabilities: internalSession.capabilities }
           : {}),
