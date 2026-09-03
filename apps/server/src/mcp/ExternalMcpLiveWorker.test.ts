@@ -269,17 +269,23 @@ describe("external MCP live worker boundary", () => {
     const descendantPidFile = NodePath.join(root, "descendant-pid");
     try {
       const result = await runFixture("late-detached-descendant", { descendantPidFile });
-      const descendantPid = Number(NodeFS.readFileSync(descendantPidFile, "utf8"));
+      const descendant = JSON.parse(NodeFS.readFileSync(descendantPidFile, "utf8")) as {
+        readonly hostPid: number;
+        readonly namespacePid: number;
+      };
       expect(result).toMatchObject({
         status: "failed",
         reason: "worker-left-descendants",
         teardown: "terminated-forcibly",
       });
-      expect(processExists(descendantPid)).toBe(false);
+      expect(descendant.hostPid).not.toBe(descendant.namespacePid);
+      expect(processExists(descendant.hostPid)).toBe(false);
     } finally {
       if (NodeFS.existsSync(descendantPidFile)) {
-        const descendantPid = Number(NodeFS.readFileSync(descendantPidFile, "utf8"));
-        if (processExists(descendantPid)) process.kill(descendantPid, "SIGKILL");
+        const descendant = JSON.parse(NodeFS.readFileSync(descendantPidFile, "utf8")) as {
+          readonly hostPid: number;
+        };
+        if (processExists(descendant.hostPid)) process.kill(descendant.hostPid, "SIGKILL");
       }
       NodeFS.rmSync(root, { recursive: true, force: true });
     }
