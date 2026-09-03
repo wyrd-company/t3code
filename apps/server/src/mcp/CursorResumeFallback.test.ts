@@ -11,6 +11,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as EffectAcpErrors from "effect-acp/errors";
 
 import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
@@ -40,12 +41,15 @@ function makeRuntime(start: AcpSessionRuntime.AcpSessionRuntime["Service"]["star
   ) as AcpSessionRuntime.AcpSessionRuntime["Service"];
 }
 
-function missingSessionError(sessionId: string) {
-  return {
-    code: -32602,
-    message: "Invalid params",
-    data: { message: `Session "${sessionId}" not found` },
-  };
+function invalidParamsError(sessionId: string, detail = `Session "${sessionId}" not found`) {
+  return EffectAcpErrors.AcpRequestError.fromProtocolError(
+    {
+      code: -32602,
+      message: "Invalid params",
+      data: { message: detail },
+    },
+    { method: "session/load" },
+  );
 }
 
 it.effect("starts a fresh Cursor session when its saved session no longer exists", () =>
@@ -88,7 +92,7 @@ it.effect("starts a fresh Cursor session when its saved session no longer exists
           );
           return makeRuntime(
             inputs.length === 1
-              ? () => Effect.die(missingSessionError(savedSessionId))
+              ? () => Effect.fail(invalidParamsError(savedSessionId))
               : () =>
                   Effect.succeed({
                     sessionId: "fresh-cursor-session",
@@ -141,10 +145,7 @@ it.effect("does not discard a saved Cursor session for another Invalid params er
         attemptCount += 1;
         return Effect.succeed(
           makeRuntime(() =>
-            Effect.die({
-              ...missingSessionError(savedSessionId),
-              data: { message: "A different parameter is invalid" },
-            }),
+            Effect.fail(invalidParamsError(savedSessionId, "A different parameter is invalid")),
           ),
         );
       },
