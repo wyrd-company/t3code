@@ -264,6 +264,27 @@ describe("external MCP live worker boundary", () => {
     }
   }, 3_000);
 
+  it("reaps a detached descendant created immediately before the worker exits", async () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-worker-late-descendant-"));
+    const descendantPidFile = NodePath.join(root, "descendant-pid");
+    try {
+      const result = await runFixture("late-detached-descendant", { descendantPidFile });
+      const descendantPid = Number(NodeFS.readFileSync(descendantPidFile, "utf8"));
+      expect(result).toMatchObject({
+        status: "failed",
+        reason: "worker-left-descendants",
+        teardown: "terminated-forcibly",
+      });
+      expect(processExists(descendantPid)).toBe(false);
+    } finally {
+      if (NodeFS.existsSync(descendantPidFile)) {
+        const descendantPid = Number(NodeFS.readFileSync(descendantPidFile, "utf8"));
+        if (processExists(descendantPid)) process.kill(descendantPid, "SIGKILL");
+      }
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }
+  }, 3_000);
+
   it("rejects duplicate structured results", async () => {
     expect(await runFixture("duplicate")).toMatchObject({
       status: "failed",
