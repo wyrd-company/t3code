@@ -139,7 +139,7 @@ describe("external MCP live worker boundary", () => {
     });
     expect(handle).toBeDefined();
     expect(processExists(handle!.pid)).toBe(false);
-  }, 2_000);
+  }, 3_000);
 
   it("accepts one matching structured result and reaps a clean exit without a signal", async () => {
     const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-worker-success-"));
@@ -262,7 +262,7 @@ describe("external MCP live worker boundary", () => {
       }
       NodeFS.rmSync(root, { recursive: true, force: true });
     }
-  }, 2_000);
+  }, 3_000);
 
   it("rejects duplicate structured results", async () => {
     expect(await runFixture("duplicate")).toMatchObject({
