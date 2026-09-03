@@ -875,6 +875,16 @@ export const openCodeMcpForThread = (threadId: ThreadId) => {
     : undefined;
 };
 
+export const addOpenCodeMcpForThread = (
+  threadId: ThreadId,
+  serverIsExternal: boolean,
+  add: (input: NonNullable<ReturnType<typeof openCodeMcpForThread>>) => Promise<unknown>,
+) => {
+  if (serverIsExternal) return Effect.void;
+  const mcp = openCodeMcpForThread(threadId);
+  return mcp ? runOpenCodeSdk("mcp.add", () => add(mcp)).pipe(Effect.asVoid) : Effect.void;
+};
+
 export function makeOpenCodeAdapter(
   openCodeSettings: OpenCodeSettings,
   options?: OpenCodeAdapterLiveOptions,
@@ -2424,10 +2434,9 @@ export function makeOpenCodeAdapter(
                 directory,
                 ...(server.serverPassword ? { serverPassword: server.serverPassword } : {}),
               });
-              const mcp = openCodeMcpForThread(input.threadId);
-              if (mcp && !server.external) {
-                yield* runOpenCodeSdk("mcp.add", () => client.mcp.add(mcp));
-              }
+              yield* addOpenCodeMcpForThread(input.threadId, server.external, (mcp) =>
+                client.mcp.add(mcp),
+              );
               // Resume: re-adopt the session named by the durable cursor —
               // OpenCode scopes history by session id. The probe recovers only
               // a confirmed not-found (start fresh); transport/auth/server
