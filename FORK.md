@@ -71,4 +71,12 @@ An external registration takes precedence over T3's internal browser-tool MCP
 credential for that thread. Provider starts, restarts, and stops do not rotate,
 replace, or clear it; only the authenticated external clear operation does.
 External endpoints reach Claude Agent and Codex through their existing driver
-configuration. They deliberately set browser-tools availability to false.
+configuration. Callers must register before starting the provider session;
+registration and clear operations do not reconfigure a running session.
+
+External registrations deliberately record browser-tools availability as false,
+but the current driver plumbing does not consume that registry field. Claude
+Agent receives no separate browser-availability signal. Codex reports browser
+tools as available whenever any MCP server is configured, including Heddle's
+external server; Heddle must not interpret that Codex signal as proof that T3's
+browser-automation tools are present.
