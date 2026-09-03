@@ -7,17 +7,22 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as McpProviderSession from "./McpProviderSession.ts";
-import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 
 export const EXTERNAL_MCP_REGISTRATION_PATH = "/api/mcp/provider-session";
 
 const ExternalMcpRegistration = Schema.Struct({
+  name: Schema.optional(
+    Schema.String.check(Schema.isPattern(/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u)),
+  ),
   threadId: ThreadId,
   endpoint: Schema.String.check(Schema.isPattern(/^https?:\/\/[^\s]+$/u)),
   authorizationHeader: Schema.String.check(Schema.isPattern(/^Bearer [^\s\r\n]{1,8192}$/u)),
 });
 
 const ExternalMcpClear = Schema.Struct({
+  name: Schema.optional(
+    Schema.String.check(Schema.isPattern(/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u)),
+  ),
   threadId: ThreadId,
 });
 
@@ -88,15 +93,16 @@ const registerRoute = HttpRouter.add(
     const input = yield* request.json.pipe(Effect.flatMap(decodeRegistration), Effect.option);
     if (input._tag === "None") return invalidRequest;
 
-    const threadId = input.value.threadId;
-    yield* McpSessionRegistry.revokeActiveMcpThread(threadId);
-    yield* Effect.sync(() =>
-      McpProviderSession.setExternalMcpProviderSession({
-        threadId,
+    const registered = yield* Effect.sync(() => {
+      const registration = {
+        threadId: input.value.threadId,
         endpoint: input.value.endpoint,
         authorizationHeader: input.value.authorizationHeader,
-      }),
-    );
+        ...(input.value.name === undefined ? {} : { name: input.value.name }),
+      };
+      return McpProviderSession.setExternalMcpProviderSession(registration);
+    });
+    if (!registered) return invalidRequest;
     return HttpServerResponse.empty({ status: 204 });
   }),
 );
@@ -109,8 +115,9 @@ const clearRoute = HttpRouter.add(
     const input = yield* request.json.pipe(Effect.flatMap(decodeClear), Effect.option);
     if (input._tag === "None") return invalidRequest;
 
-    const threadId = input.value.threadId;
-    yield* Effect.sync(() => McpProviderSession.clearExternalMcpProviderSession(threadId));
+    yield* Effect.sync(() =>
+      McpProviderSession.clearExternalMcpProviderSession(input.value.threadId, input.value.name),
+    );
     return HttpServerResponse.empty({ status: 204 });
   }),
 );

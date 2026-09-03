@@ -4,9 +4,11 @@ import {
   ClaudeSettings,
   CodexSettings,
   CursorSettings,
+  EnvironmentId,
   GrokSettings,
   OpenCodeSettings,
   ProviderDriverKind,
+  ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
@@ -29,6 +31,8 @@ import * as McpProviderSession from "./McpProviderSession.ts";
 const threadId = ThreadId.make("thread-start-evidence");
 const endpoint = "https://service.example.test/api";
 const authorizationHeader = "Bearer token-alpha";
+const internalEndpoint = "http://127.0.0.1/internal";
+const internalAuthorizationHeader = "Bearer token-beta";
 const claudeSettings = Schema.decodeSync(ClaudeSettings)({});
 const codexSettings = Schema.decodeSync(CodexSettings)({});
 const cursorSettings = Schema.decodeSync(CursorSettings)({});
@@ -44,6 +48,16 @@ const dependencies = ServerConfig.layerTest(process.cwd(), process.cwd()).pipe(
 
 const arrange = () => {
   McpProviderSession.clearAllMcpProviderSessions();
+  McpProviderSession.setMcpProviderSession({
+    source: "internal",
+    environmentId: EnvironmentId.make("environment-start-evidence"),
+    threadId,
+    providerSessionId: "provider-session-start-evidence",
+    providerInstanceId: ProviderInstanceId.make("codex"),
+    endpoint: internalEndpoint,
+    authorizationHeader: internalAuthorizationHeader,
+    browserToolsAvailable: true,
+  });
   McpProviderSession.setExternalMcpProviderSession({
     threadId,
     endpoint,
@@ -90,6 +104,11 @@ it.effect("passes external MCP through the real Claude startSession query call s
     expect(captured?.mcpServers).toEqual({
       "t3-code": {
         type: "http",
+        url: internalEndpoint,
+        headers: { Authorization: internalAuthorizationHeader },
+      },
+      external: {
+        type: "http",
         url: endpoint,
         headers: { Authorization: authorizationHeader },
       },
@@ -114,8 +133,11 @@ it.effect("passes external MCP through the real Codex startSession runtime call 
         runtimeMode: "full-access",
       })
       .pipe(Effect.exit);
-    expect(captured?.appServerArgs).toContain(`mcp_servers.t3-code.url=${endpoint}`);
-    expect(captured?.environment?.T3_MCP_BEARER_TOKEN).toBe("token-alpha");
+    expect(captured?.appServerArgs).toContain(`mcp_servers.t3-code.url=${internalEndpoint}`);
+    expect(captured?.appServerArgs).toContain(`mcp_servers.external.url=${endpoint}`);
+    expect(captured?.environment?.T3_MCP_BEARER_TOKEN_T3_CODE).toBe("token-beta");
+    expect(captured?.environment?.T3_MCP_BEARER_TOKEN_EXTERNAL).toBe("token-alpha");
+    expect(McpProviderSession.hasInternalMcpProviderSession(threadId)).toBe(true);
   }).pipe(Effect.provide(dependencies)),
 );
 
@@ -141,6 +163,12 @@ it.effect("passes external MCP through the real Cursor startSession ACP call sit
       {
         type: "http",
         name: "t3-code",
+        url: internalEndpoint,
+        headers: [{ name: "Authorization", value: internalAuthorizationHeader }],
+      },
+      {
+        type: "http",
+        name: "external",
         url: endpoint,
         headers: [{ name: "Authorization", value: authorizationHeader }],
       },
@@ -170,6 +198,12 @@ it.effect("passes external MCP through the real Grok startSession ACP call site"
       {
         type: "http",
         name: "t3-code",
+        url: internalEndpoint,
+        headers: [{ name: "Authorization", value: internalAuthorizationHeader }],
+      },
+      {
+        type: "http",
+        name: "external",
         url: endpoint,
         headers: [{ name: "Authorization", value: authorizationHeader }],
       },
@@ -192,6 +226,15 @@ it.effect("passes external MCP through the real OpenCode startSession SDK call s
     expect(added).toEqual([
       {
         name: "t3-code",
+        config: {
+          type: "remote",
+          url: internalEndpoint,
+          headers: { Authorization: internalAuthorizationHeader },
+          oauth: false,
+        },
+      },
+      {
+        name: "external",
         config: {
           type: "remote",
           url: endpoint,
