@@ -10,3 +10,5 @@ apps/server/src/provider/Layers/CodexSessionRuntime.ts
 apps/server/src/provider/Layers/CursorAdapter.ts
 apps/server/src/provider/Layers/GrokAdapter.ts
 apps/server/src/provider/Layers/OpenCodeAdapter.ts
+apps/server/package.json
+pnpm-lock.yaml
