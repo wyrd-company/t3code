@@ -207,7 +207,7 @@ it("keeps external registration when the internal credential path clears or repl
     authorizationHeader: "Bearer token-beta",
     browserToolsAvailable: true,
   });
-  McpProviderSession.clearInternalMcpProviderSession(threadId);
+  McpProviderSession.clearMcpProviderSession(threadId);
   expect(McpProviderSession.readMcpProviderSessionIncludingExternal(threadId)?.source).toBe(
     "external",
   );
