@@ -126,6 +126,11 @@ const resultFromSnapshot = (
       if (snapshot.result.harness !== harness) {
         return failedResult(harness, "wrong-harness-result", teardown);
       }
+      if (snapshot.result.status === "passed") {
+        return teardown === "exited-without-signal"
+          ? { ...snapshot.result, teardown }
+          : failedResult(harness, "worker-deadline-exceeded", teardown, "complete");
+      }
       return { ...snapshot.result, teardown };
     }
   }
