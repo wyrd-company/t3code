@@ -2757,6 +2757,7 @@ export const mcpRuntimeOptionsForThread = (
         ...(internalSession?.capabilities
           ? { mcpCapabilities: internalSession.capabilities }
           : {}),
+        browserToolsAvailable: internalSession?.browserToolsAvailable ?? false,
       }
     : undefined;
 };

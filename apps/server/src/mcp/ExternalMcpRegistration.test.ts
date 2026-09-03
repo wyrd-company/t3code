@@ -444,6 +444,7 @@ it("attaches external MCP through the Codex session runtime options", () => {
       "-c",
       'mcp_servers.external.bearer_token_env_var="T3_MCP_BEARER_TOKEN_EXTERNAL"',
     ],
+    browserToolsAvailable: false,
   });
 });
 

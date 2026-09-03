@@ -62,6 +62,14 @@ for supported_mcp_adapter in Claude Codex Cursor Grok OpenCode; do
 done
 echo "PASS allowlist-covers-supported-mcp-adapters"
 
+codex_runtime_path="apps/server/src/provider/Layers/CodexSessionRuntime.ts"
+if ! grep --fixed-strings --line-regexp --quiet -- "$codex_runtime_path" \
+  "${repo_root}/.github/fork/allowlist.txt"; then
+  echo "FAIL allowlist-covers-codex-browser-tool-signal: missing ${codex_runtime_path}" >&2
+  exit 1
+fi
+echo "PASS allowlist-covers-codex-browser-tool-signal"
+
 allowlist_repo="${fixture_root}/allowlist"
 mkdir -p "${allowlist_repo}/.github/fork" "${allowlist_repo}/apps/server/src/mcp"
 git -C "$allowlist_repo" init --quiet

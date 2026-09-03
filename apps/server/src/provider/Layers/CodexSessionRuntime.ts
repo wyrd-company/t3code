@@ -181,7 +181,18 @@ export interface CodexSessionRuntimeOptions {
   readonly appServerArgs?: ReadonlyArray<string>;
   /** Capabilities the session's `t3-code` MCP credential grants; drives the prompt blocks. */
   readonly mcpCapabilities?: ReadonlySet<string>;
+  /** Overrides the browser block; an external-only MCP configuration has no `t3-code` browser tools. */
+  readonly browserToolsAvailable?: boolean;
 }
+
+export const browserToolsAvailableForSession = (
+  options: Pick<
+    CodexSessionRuntimeOptions,
+    "appServerArgs" | "browserToolsAvailable" | "mcpCapabilities"
+  >,
+): boolean =>
+  options.browserToolsAvailable ??
+  configuredMcpToolAvailability(options.appServerArgs, options.mcpCapabilities).browser;
 
 export interface CodexSessionRuntimeSendTurnInput {
   readonly input?: string;
@@ -2458,10 +2469,10 @@ export const makeCodexSessionRuntime = (
             // Derived from the session's own credential rather than the
             // setting, so the prompt describes the tools this turn actually
             // has even if the setting changed after the session started.
-            browserToolsAvailable: configuredMcpToolAvailability(
-              options.appServerArgs,
-              options.mcpCapabilities,
-            ),
+            browserToolsAvailable: {
+              ...configuredMcpToolAvailability(options.appServerArgs, options.mcpCapabilities),
+              browser: browserToolsAvailableForSession(options),
+            },
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(

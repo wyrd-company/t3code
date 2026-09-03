@@ -78,12 +78,11 @@ register before starting the provider session. The new external configuration
 attaches only when the provider session next starts. Clearing an external
 registration does not reconfigure a running session.
 
-External registrations deliberately record browser-tools availability as false,
-but the current driver plumbing does not consume that registry field. Claude
-Agent receives no separate browser-availability signal. Codex reports browser
-tools as available whenever any MCP server is configured, including Heddle's
-external server; Heddle must not interpret that Codex signal as proof that T3's
-browser-automation tools are present.
+External registrations record browser-tools availability as false. Thread-level
+browser-tools availability is true only while the internal `t3-code` entry is
+present. Codex carries that value into its developer instructions instead of
+inferring browser-tool availability from the presence of any MCP server. Claude
+Agent receives no separate browser-availability signal.
 
 Cursor and Grok receive the endpoint as an ACP HTTP MCP server. OpenCode adds it
 as a remote MCP server through the SDK. These drivers receive no separate
