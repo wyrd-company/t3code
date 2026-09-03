@@ -292,6 +292,8 @@ describe("external MCP live worker boundary", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     let result: Awaited<ReturnType<typeof runFixture>> | undefined;
     let discardedOutput: ExternalMcpLiveWorkerDiscardedOutput | undefined;
@@ -313,6 +315,8 @@ describe("external MCP live worker boundary", () => {
       log: log.mock.calls,
       error: error.mock.calls,
       warn: warn.mock.calls,
+      stdout: stdout.mock.calls.map(([chunk]) => String(chunk)),
+      stderr: stderr.mock.calls.map(([chunk]) => String(chunk)),
     });
     expect(observable).not.toContain(sentinel);
     expect(result).toMatchObject({ status: "passed", reason: "all-assertions-passed" });
