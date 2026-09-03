@@ -2051,6 +2051,7 @@ export const mcpRuntimeOptionsForThread = (
             `mcp_servers.${mcpSession.name}.bearer_token_env_var="${tokenEnvironmentVariable}"`,
           ];
         }),
+        browserToolsAvailable: McpProviderSession.hasInternalMcpProviderSession(threadId),
       }
     : undefined;
 };
