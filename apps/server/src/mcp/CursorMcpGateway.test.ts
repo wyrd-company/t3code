@@ -24,6 +24,11 @@ interface FixtureServer {
 const startFixtureServer = (input: {
   readonly toolName: string;
   readonly response: string;
+  readonly toolPages?: ReadonlyArray<{
+    readonly tools: ReadonlyArray<Record<string, unknown>>;
+    readonly nextCursor?: string;
+  }>;
+  readonly toolResultContent?: ReadonlyArray<Record<string, unknown>>;
 }): Effect.Effect<FixtureServer, never, Scope.Scope> =>
   Effect.gen(function* () {
     const nodeHttp = yield* Effect.promise(() => import("node:http"));
@@ -43,7 +48,7 @@ const startFixtureServer = (input: {
             const message = JSON.parse(body) as {
               readonly id?: string | number;
               readonly method: string;
-              readonly params?: { readonly name?: string };
+              readonly params?: { readonly name?: string; readonly cursor?: string };
             };
             if (message.method === "notifications/initialized") {
               response.writeHead(202).end();
@@ -57,7 +62,11 @@ const startFixtureServer = (input: {
                     serverInfo: { name: "fixture", version: "1.0.0" },
                   }
                 : message.method === "tools/list"
-                  ? {
+                  ? (input.toolPages?.[
+                      message.params?.cursor === undefined
+                        ? 0
+                        : Number(message.params.cursor.replace("page-", ""))
+                    ] ?? {
                       tools: [
                         {
                           name: input.toolName,
@@ -65,14 +74,17 @@ const startFixtureServer = (input: {
                           inputSchema: { type: "object", properties: {} },
                         },
                       ],
-                    }
+                    })
                   : {
-                      content: [
+                      content: input.toolResultContent ?? [
                         {
                           type: "text",
                           text: `${input.response}:${message.params?.name ?? "unknown"}`,
                         },
                       ],
+                      ...(input.toolResultContent === undefined
+                        ? {}
+                        : { structuredContent: { ok: true } }),
                     };
             response.writeHead(200, { "content-type": "application/json" });
             response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
@@ -127,14 +139,24 @@ const connectGateway = (endpoint: string, authorizationHeader: string) =>
 const withGateway = Effect.fn("CursorMcpGatewayTest.withGateway")(function* (input: {
   readonly internalToolName?: string;
   readonly externalToolName?: string;
+  readonly internalToolPages?: Parameters<typeof startFixtureServer>[0]["toolPages"];
+  readonly externalToolPages?: Parameters<typeof startFixtureServer>[0]["toolPages"];
+  readonly externalToolResultContent?: Parameters<
+    typeof startFixtureServer
+  >[0]["toolResultContent"];
 }) {
   const internalFixture = yield* startFixtureServer({
     toolName: input.internalToolName ?? "internal_tool",
     response: "internal",
+    ...(input.internalToolPages === undefined ? {} : { toolPages: input.internalToolPages }),
   });
   const externalFixture = yield* startFixtureServer({
     toolName: input.externalToolName ?? "external_tool",
     response: "external",
+    ...(input.externalToolPages === undefined ? {} : { toolPages: input.externalToolPages }),
+    ...(input.externalToolResultContent === undefined
+      ? {}
+      : { toolResultContent: input.externalToolResultContent }),
   });
   const sessionScope = yield* Scope.make();
   yield* Effect.addFinalizer(() => Scope.close(sessionScope, Exit.void));
@@ -204,6 +226,137 @@ it.effect("routes raw tool names and contains downstream credentials", () =>
       expect(fixture.externalFixture.authorizationHeaders).toContain("Bearer external-secret");
       expect(gateway.authorizationHeader).toBe(fixture.issued.config.authorizationHeader);
       yield* Effect.promise(() => client.close());
+    }),
+  ),
+);
+
+it.effect("preserves supported tool metadata and decodes embedded resource blobs", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixture = yield* withGateway({
+        externalToolPages: [
+          {
+            tools: [
+              {
+                name: "external_tool",
+                title: "External fixture",
+                description: "fixture tool",
+                inputSchema: { type: "object", properties: {} },
+                outputSchema: { type: "object", properties: { ok: { type: "boolean" } } },
+                annotations: {
+                  title: "Fixture hint",
+                  readOnlyHint: true,
+                  destructiveHint: false,
+                  idempotentHint: true,
+                  openWorldHint: false,
+                },
+                _meta: { "fixture.example/label": "preserved" },
+              },
+            ],
+          },
+        ],
+        externalToolResultContent: [
+          {
+            type: "resource",
+            resource: {
+              uri: "fixture://binary",
+              mimeType: "application/octet-stream",
+              blob: Buffer.from("binary fixture").toString("base64"),
+            },
+          },
+        ],
+      });
+      const gateway = yield* startCursorMcpGateway({
+        sessions: fixture.sessions,
+        scope: fixture.sessionScope,
+      });
+      const client = yield* connectGateway(gateway.endpoint, gateway.authorizationHeader);
+      const listed = yield* Effect.promise(() => client.listTools());
+      expect(listed.tools.find(({ name }) => name === "external_tool")).toMatchObject({
+        title: "External fixture",
+        description: "fixture tool",
+        outputSchema: { type: "object", properties: { ok: { type: "boolean" } } },
+        annotations: {
+          title: "Fixture hint",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        _meta: { "fixture.example/label": "preserved" },
+      });
+      const result = yield* Effect.promise(() =>
+        client.callTool({ name: "external_tool", arguments: {} }),
+      );
+      expect(result).toMatchObject({
+        content: [
+          {
+            type: "resource",
+            resource: {
+              uri: "fixture://binary",
+              blob: Buffer.from("binary fixture").toString("base64"),
+            },
+          },
+        ],
+      });
+    }),
+  ),
+);
+
+it.effect("routes later tools pages and checks their names for collisions", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const laterTool = {
+        name: "later_tool",
+        description: "later fixture tool",
+        inputSchema: { type: "object", properties: {} },
+      };
+      const fixture = yield* withGateway({
+        externalToolPages: [{ tools: [], nextCursor: "page-1" }, { tools: [laterTool] }],
+      });
+      const gateway = yield* startCursorMcpGateway({
+        sessions: fixture.sessions,
+        scope: fixture.sessionScope,
+      });
+      const client = yield* connectGateway(gateway.endpoint, gateway.authorizationHeader);
+      expect(
+        (yield* Effect.promise(() => client.listTools())).tools.map(({ name }) => name),
+      ).toContain("later_tool");
+      expect(
+        yield* Effect.promise(() => client.callTool({ name: "later_tool", arguments: {} })),
+      ).toMatchObject({ content: [{ type: "text", text: "external:later_tool" }] });
+
+      const collisionFixture = yield* withGateway({
+        internalToolName: "later_tool",
+        externalToolPages: [{ tools: [], nextCursor: "page-1" }, { tools: [laterTool] }],
+      });
+      expect(
+        Exit.isFailure(
+          yield* startCursorMcpGateway({
+            sessions: collisionFixture.sessions,
+            scope: collisionFixture.sessionScope,
+          }).pipe(Effect.exit),
+        ),
+      ).toBe(true);
+    }),
+  ),
+);
+
+it.effect("rejects cyclic downstream tool cursors", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fixture = yield* withGateway({
+        externalToolPages: [
+          { tools: [], nextCursor: "page-1" },
+          { tools: [], nextCursor: "page-1" },
+        ],
+      });
+      const exit = yield* startCursorMcpGateway({
+        sessions: fixture.sessions,
+        scope: fixture.sessionScope,
+      }).pipe(Effect.exit);
+      expect(Exit.isFailure(exit)).toBe(true);
+      expect(String(exit)).toContain("invalid or cyclic tools cursor");
     }),
   ),
 );

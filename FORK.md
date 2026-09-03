@@ -41,6 +41,7 @@ The diff from the base pin can contain any added file. Modifications are limited
 - `apps/server/src/mcp/**`
 - `apps/server/src/provider/Layers/ClaudeAdapter.ts`
 - `apps/server/src/provider/Layers/CodexAdapter.ts`
+- `apps/server/src/provider/Layers/CodexSessionRuntime.ts`
 - `apps/server/src/provider/Layers/CursorAdapter.ts`
 - `apps/server/src/provider/Layers/GrokAdapter.ts`
 - `apps/server/src/provider/Layers/OpenCodeAdapter.ts`
@@ -96,6 +97,11 @@ endpoint as a remote MCP server through the SDK. Cursor's loopback gateway is
 authenticated by the existing internal provider credential and closes its
 downstream clients on provider stop or credential revocation. These drivers
 receive no separate browser-availability signal from the registry.
+
+The gateway preserves MCP tool name, title, description, input schema, output
+schema, annotations, and `_meta`. Effect's inbound MCP tool model does not
+represent the SDK's `icons` or `execution` fields, so those fields do not reach
+Cursor through this compatibility gateway.
 
 OpenCode installs per-thread MCP configuration only into a server process owned
 by that provider session. It does not install the endpoint into a configured
