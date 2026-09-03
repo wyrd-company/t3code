@@ -14,11 +14,11 @@ import * as McpProviderSession from "./McpProviderSession.ts";
 export interface McpCredentialRequest {
   readonly threadId: ThreadId;
   readonly providerInstanceId: ProviderInstanceId;
-  readonly capabilities: ReadonlySet<McpInvocationContext.McpCapability>;
+  readonly capabilities?: ReadonlySet<McpInvocationContext.McpCapability>;
 }
 
 export interface McpIssuedCredential {
-  readonly config: McpProviderSession.McpProviderSessionConfig;
+  readonly config: McpProviderSession.InternalMcpProviderSessionConfig;
 }
 
 export interface McpSessionRegistryShape {
@@ -131,7 +131,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
         providerInstanceId: ProviderInstanceId.make(request.providerInstanceId),
         capabilities: new Set<McpInvocationContext.McpCapability>([
           "pull-requests",
-          ...request.capabilities,
+          ...(request.capabilities ?? []),
         ]),
         issuedAt,
       };
@@ -142,6 +142,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
       });
       return {
         config: {
+          source: "internal",
           environmentId,
           threadId: scope.threadId,
           providerSessionId,
@@ -149,6 +150,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
           endpoint,
           authorizationHeader: `Bearer ${rawToken}`,
           capabilities: scope.capabilities,
+          browserToolsAvailable: scope.capabilities.has("preview"),
         },
       };
     },

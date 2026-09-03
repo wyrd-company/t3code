@@ -17,6 +17,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
 import * as DeviceService from "../device/DeviceService.ts";
+import * as ExternalMcpRegistration from "./ExternalMcpRegistration.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
@@ -629,7 +630,10 @@ const McpTransportLive = McpServer.layerHttp({
 }).pipe(Layer.provide(McpAuthMiddlewareLive));
 
 export const layer = Layer.mergeAll(
-  PreviewToolkitRegistrationLive,
-  PullRequestsToolkitRegistrationLive,
-  DeviceToolkitRegistrationLive,
-).pipe(Layer.provideMerge(McpTransportLive));
+  Layer.mergeAll(
+    PreviewToolkitRegistrationLive,
+    PullRequestsToolkitRegistrationLive,
+    DeviceToolkitRegistrationLive,
+  ).pipe(Layer.provideMerge(McpTransportLive)),
+  ExternalMcpRegistration.layer,
+);

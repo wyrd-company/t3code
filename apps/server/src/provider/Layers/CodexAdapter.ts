@@ -2254,7 +2254,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           input.modelSelection?.instanceId === boundInstanceId
             ? getCodexServiceTierOptionValue(input.modelSelection)
             : undefined;
-        const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+        const mcpRuntimeOptions = mcpRuntimeOptionsForThread(input.threadId, options?.environment);
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
@@ -2271,24 +2271,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? { model: input.modelSelection.model }
             : {}),
           ...(serviceTier ? { serviceTier } : {}),
-          ...(mcpSession
-            ? {
-                environment: {
-                  ...McpProviderSession.withAgentDeviceEnvironment(
-                    options?.environment ?? process.env,
-                    mcpSession,
-                  ),
-                  T3_MCP_BEARER_TOKEN: mcpSession.authorizationHeader.replace(/^Bearer\s+/, ""),
-                },
-                appServerArgs: [
-                  "-c",
-                  `mcp_servers.t3-code.url=${mcpSession.endpoint}`,
-                  "-c",
-                  'mcp_servers.t3-code.bearer_token_env_var="T3_MCP_BEARER_TOKEN"',
-                ],
-                mcpCapabilities: mcpSession.capabilities,
-              }
-            : {}),
+          ...mcpRuntimeOptions,
         };
         const turnTokenUsage = makeCodexTurnTokenUsageState();
         // Codex reports a usage-limit stop as OpenAI's own sentence, which on a
@@ -2741,3 +2724,28 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 // `CodexDriver.create()` for each configured instance; downstream consumers
 // (server bootstrap, integration harness, this module's tests) will be
 // migrated to the registry in a follow-up pass.
+export const mcpRuntimeOptionsForThread = (
+  threadId: ThreadId,
+  environment: NodeJS.ProcessEnv = process.env,
+) => {
+  const mcpSession = McpProviderSession.readMcpProviderSessionIncludingExternal(threadId);
+  const internalSession = mcpSession?.source === "internal" ? mcpSession : undefined;
+  return mcpSession
+    ? {
+        browserToolsAvailable: mcpSession.browserToolsAvailable,
+        environment: {
+          ...McpProviderSession.withAgentDeviceEnvironment(environment, internalSession),
+          T3_MCP_BEARER_TOKEN: mcpSession.authorizationHeader.replace(/^Bearer\s+/, ""),
+        },
+        appServerArgs: [
+          "-c",
+          `mcp_servers.t3-code.url=${mcpSession.endpoint}`,
+          "-c",
+          'mcp_servers.t3-code.bearer_token_env_var="T3_MCP_BEARER_TOKEN"',
+        ],
+        ...(internalSession?.capabilities
+          ? { mcpCapabilities: internalSession.capabilities }
+          : {}),
+      }
+    : undefined;
+};
