@@ -17,6 +17,9 @@ import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import { mcpServerForThread } from "../provider/Layers/ClaudeAdapter.ts";
 import { mcpRuntimeOptionsForThread } from "../provider/Layers/CodexAdapter.ts";
+import { cursorMcpServersForThread } from "../provider/Layers/CursorAdapter.ts";
+import { grokMcpServersForThread } from "../provider/Layers/GrokAdapter.ts";
+import { openCodeMcpForThread } from "../provider/Layers/OpenCodeAdapter.ts";
 import { EXTERNAL_MCP_REGISTRATION_PATH } from "./ExternalMcpRegistration.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpProviderSession from "./McpProviderSession.ts";
@@ -234,7 +237,7 @@ it.effect("rejects a blank external MCP thread ID", () =>
   ),
 );
 
-it.effect("registers, plumbs, and clears one external MCP session for Claude and Codex", () =>
+it.effect("registers, plumbs, and clears one external MCP session for every harness", () =>
   Effect.scoped(
     Effect.gen(function* () {
       McpProviderSession.clearAllMcpProviderSessions();
@@ -268,6 +271,25 @@ it.effect("registers, plumbs, and clears one external MCP session for Claude and
           "-c",
           'mcp_servers.t3-code.bearer_token_env_var="T3_MCP_BEARER_TOKEN"',
         ],
+      });
+      const acpMcpServers = [
+        {
+          type: "http",
+          name: "t3-code",
+          url: endpoint,
+          headers: [{ name: "Authorization", value: authorizationHeader }],
+        },
+      ];
+      expect(cursorMcpServersForThread(threadId)).toEqual(acpMcpServers);
+      expect(grokMcpServersForThread(threadId)).toEqual(acpMcpServers);
+      expect(openCodeMcpForThread(threadId)).toEqual({
+        name: "t3-code",
+        config: {
+          type: "remote",
+          url: endpoint,
+          headers: { Authorization: authorizationHeader },
+          oauth: false,
+        },
       });
 
       McpProviderSession.setExternalMcpProviderSession({
