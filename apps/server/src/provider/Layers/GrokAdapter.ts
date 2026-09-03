@@ -343,7 +343,7 @@ export function grokPromptSettlementBelongsToContext(input: {
   );
 }
 
-export const grokMcpServersForThread = (threadId: ThreadId) => {
+const grokMcpServersForThread = (threadId: ThreadId) => {
   const mcpSession = McpProviderSession.readMcpProviderSessionIncludingExternal(threadId);
   return mcpSession
     ? [
@@ -355,6 +355,14 @@ export const grokMcpServersForThread = (threadId: ThreadId) => {
         },
       ]
     : undefined;
+};
+
+export const attachGrokMcpForThread = <Options extends object>(
+  threadId: ThreadId,
+  options: Options,
+) => {
+  const mcpServers = grokMcpServersForThread(threadId);
+  return mcpServers ? { ...options, mcpServers } : options;
 };
 
 export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapterLiveOptions) {
@@ -1006,25 +1014,26 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             threadId: input.threadId,
           });
 
-          const mcpServers = grokMcpServersForThread(input.threadId);
-          const acp = yield* makeGrokAcpRuntime({
-            grokSettings,
-            ...(options?.environment || mcpSession?.agentDeviceEnvironment
-              ? {
-                  environment: McpProviderSession.withAgentDeviceEnvironment(
-                    options?.environment ?? process.env,
-                    mcpSession,
-                  ),
-                }
-              : {}),
-            childProcessSpawner,
-            cwd,
-            runtimeMode: input.runtimeMode,
-            ...(resumeSessionId ? { resumeSessionId } : {}),
-            clientInfo: { name: "t3-code", version: "0.0.0" },
-            ...(mcpServers ? { mcpServers } : {}),
-            ...acpNativeLoggers,
-          }).pipe(
+          const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+          const acp = yield* makeGrokAcpRuntime(
+            attachGrokMcpForThread(input.threadId, {
+              grokSettings,
+              ...(options?.environment || mcpSession?.agentDeviceEnvironment
+                ? {
+                    environment: McpProviderSession.withAgentDeviceEnvironment(
+                      options?.environment ?? process.env,
+                      mcpSession,
+                    ),
+                  }
+                : {}),
+              childProcessSpawner,
+              cwd,
+              runtimeMode: input.runtimeMode,
+              ...(resumeSessionId ? { resumeSessionId } : {}),
+              clientInfo: { name: "t3-code", version: "0.0.0" },
+              ...acpNativeLoggers,
+            }),
+          ).pipe(
             Effect.provideService(Crypto.Crypto, crypto),
             Effect.provideService(Scope.Scope, sessionScope),
             Effect.mapError(

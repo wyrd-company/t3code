@@ -2254,25 +2254,27 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           input.modelSelection?.instanceId === boundInstanceId
             ? getCodexServiceTierOptionValue(input.modelSelection)
             : undefined;
-        const mcpRuntimeOptions = mcpRuntimeOptionsForThread(input.threadId, options?.environment);
-        const runtimeInput: CodexSessionRuntimeOptions = {
-          threadId: input.threadId,
-          providerInstanceId: boundInstanceId,
-          cwd: input.cwd ?? process.cwd(),
-          binaryPath: codexConfig.binaryPath,
-          launchArgs: resolveCodexLaunchArgs(codexConfig.launchArgs, options?.environment),
-          ...(options?.environment ? { environment: options.environment } : {}),
-          ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
-          ...(isCodexResumeCursorSchema(input.resumeCursor)
-            ? { resumeCursor: input.resumeCursor }
-            : {}),
-          runtimeMode: input.runtimeMode,
-          ...(input.modelSelection?.instanceId === boundInstanceId
-            ? { model: input.modelSelection.model }
-            : {}),
-          ...(serviceTier ? { serviceTier } : {}),
-          ...mcpRuntimeOptions,
-        };
+        const runtimeInput: CodexSessionRuntimeOptions = attachCodexMcpForThread(
+          input.threadId,
+          {
+            threadId: input.threadId,
+            providerInstanceId: boundInstanceId,
+            cwd: input.cwd ?? process.cwd(),
+            binaryPath: codexConfig.binaryPath,
+            launchArgs: resolveCodexLaunchArgs(codexConfig.launchArgs, options?.environment),
+            ...(options?.environment ? { environment: options.environment } : {}),
+            ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
+            ...(isCodexResumeCursorSchema(input.resumeCursor)
+              ? { resumeCursor: input.resumeCursor }
+              : {}),
+            runtimeMode: input.runtimeMode,
+            ...(input.modelSelection?.instanceId === boundInstanceId
+              ? { model: input.modelSelection.model }
+              : {}),
+            ...(serviceTier ? { serviceTier } : {}),
+          },
+          options?.environment,
+        );
         const turnTokenUsage = makeCodexTurnTokenUsageState();
         // Codex reports a usage-limit stop as OpenAI's own sentence, which on a
         // Business workspace blames credits for a window that ran out. The
@@ -2747,4 +2749,13 @@ export const mcpRuntimeOptionsForThread = (
           : {}),
       }
     : undefined;
+};
+
+export const attachCodexMcpForThread = <Options extends object>(
+  threadId: ThreadId,
+  options: Options,
+  environment?: NodeJS.ProcessEnv,
+) => {
+  const mcpRuntimeOptions = mcpRuntimeOptionsForThread(threadId, environment);
+  return mcpRuntimeOptions ? { ...options, ...mcpRuntimeOptions } : options;
 };
