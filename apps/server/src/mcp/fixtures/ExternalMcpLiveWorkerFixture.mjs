@@ -66,6 +66,33 @@ switch (mode) {
     stayAlive();
     break;
   }
+  case "late-detached-descendant": {
+    const descendantPidFile = process.env.T3_EXTERNAL_MCP_WORKER_FIXTURE_DESCENDANT_PID_FILE;
+    try {
+      NodeFS.writeSync(
+        3,
+        `${JSON.stringify({
+          protocol: 1,
+          kind: "exited",
+          code: 0,
+          signal: null,
+          leftDescendants: false,
+        })}\n`,
+      );
+    } catch {
+      // The worker must not inherit the supervisor's private lifecycle pipe.
+    }
+    const descendant = NodeChildProcess.spawn(
+      process.execPath,
+      ["-e", "process.on('SIGTERM', () => {}); setInterval(() => undefined, 1000);"],
+      { detached: true, stdio: "ignore" },
+    );
+    descendant.unref();
+    NodeFS.writeFileSync(descendantPidFile, String(descendant.pid));
+    write(result());
+    process.exit(0);
+    break;
+  }
   case "duplicate":
     write(result());
     write(result());
