@@ -63,6 +63,11 @@ it.effect("starts a fresh Cursor session when its saved session no longer exists
       authorizationHeader: "Bearer test-token",
       browserToolsAvailable: true,
     });
+    McpProviderSession.setExternalMcpProviderSession({
+      threadId,
+      endpoint: "https://service.example.test/mcp",
+      authorizationHeader: "Bearer external-test-token",
+    });
 
     const inputs: Array<CursorAcpRuntimeInput> = [];
     let closedRuntimeCount = 0;
@@ -106,7 +111,16 @@ it.effect("starts a fresh Cursor session when its saved session no longer exists
     expect(inputs).toHaveLength(2);
     expect(inputs[0]?.resumeSessionId).toBe(savedSessionId);
     expect(inputs[1]?.resumeSessionId).toBeUndefined();
-    expect(inputs[1]?.mcpServers).toEqual(inputs[0]?.mcpServers);
+    const expectedMcpServers = [
+      {
+        type: "http",
+        name: "t3-code",
+        url: "http://127.0.0.1/gateway",
+        headers: [{ name: "Authorization", value: "Bearer gateway-token" }],
+      },
+    ];
+    expect(inputs[0]?.mcpServers).toEqual(expectedMcpServers);
+    expect(inputs[1]?.mcpServers).toEqual(expectedMcpServers);
     expect(session.resumeCursor).toEqual({
       schemaVersion: 1,
       sessionId: "fresh-cursor-session",
