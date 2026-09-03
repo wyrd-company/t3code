@@ -134,6 +134,11 @@ export const startCursorMcpGateway = Effect.fn("CursorMcpGateway.start")(functio
     });
   }
 
+  yield* McpSessionRegistry.onActiveMcpProviderSessionRevoked(
+    internal.providerSessionId,
+    Scope.close(input.scope, Exit.void),
+  ).pipe(Effect.provideService(Scope.Scope, input.scope));
+
   const downstreams: Array<Downstream> = [];
   for (const session of input.sessions) {
     const downstream = yield* connectDownstream(session).pipe(
@@ -249,11 +254,6 @@ export const startCursorMcpGateway = Effect.fn("CursorMcpGateway.start")(functio
       message: "Cursor MCP gateway did not bind a TCP listener.",
     });
   }
-
-  yield* McpSessionRegistry.onActiveMcpProviderSessionRevoked(
-    internal.providerSessionId,
-    Scope.close(input.scope, Exit.void),
-  ).pipe(Effect.provideService(Scope.Scope, input.scope));
 
   return {
     name: McpProviderSession.INTERNAL_MCP_SERVER_NAME,
