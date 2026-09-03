@@ -58,3 +58,17 @@ Repository variables named for any of the six public configuration values are op
 Pull request CI resolves the recorded upstream version through the GitHub API and requires its tag commit to equal the base pin. This external check fails closed so a mismatch cannot survive until an immutable release tag.
 
 The release tarball includes the upstream MIT [LICENSE](LICENSE) and keeps the package repository attribution to `pingdotgg/t3code`.
+
+## External MCP registration
+
+The server branch accepts authenticated `PUT` and `DELETE` requests at
+`/api/mcp/provider-session`. Both operations require the
+`orchestration:operate` environment scope. Registration accepts a thread ID,
+an HTTP or HTTPS endpoint, and a Bearer authorization header. Successful
+responses are empty and never return the authorization header.
+
+An external registration takes precedence over T3's internal browser-tool MCP
+credential for that thread. Provider starts, restarts, and stops do not rotate,
+replace, or clear it; only the authenticated external clear operation does.
+External endpoints reach Claude Agent and Codex through their existing driver
+configuration. They deliberately set browser-tools availability to false.
