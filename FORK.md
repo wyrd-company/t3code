@@ -66,8 +66,10 @@ The release tarball includes the upstream MIT [LICENSE](LICENSE) and keeps the p
 The server branch accepts authenticated `PUT` and `DELETE` requests at
 `/api/mcp/provider-session`. Both operations require the
 `orchestration:operate` environment scope. Registration accepts a thread ID,
-an HTTP or HTTPS endpoint, and a Bearer authorization header. Successful
-responses are empty and never return the authorization header.
+an HTTP or HTTPS endpoint, a Bearer authorization header, and an optional
+lower-case server name. Omitting the name selects the stable `external`
+default. Successful responses are empty and never return the authorization
+header. The reserved internal name `t3-code` cannot be registered externally.
 
 An external registration is additive to T3's internal browser-tool MCP entry
 for that thread. Registering or clearing an external entry does not rotate,
