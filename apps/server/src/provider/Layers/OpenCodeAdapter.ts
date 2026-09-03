@@ -934,6 +934,21 @@ const stopOpenCodeContext = Effect.fn("stopOpenCodeContext")(function* (
   return true;
 });
 
+export const openCodeMcpForThread = (threadId: ThreadId) => {
+  const mcpSession = McpProviderSession.readMcpProviderSessionIncludingExternal(threadId);
+  return mcpSession
+    ? {
+        name: "t3-code",
+        config: {
+          type: "remote" as const,
+          url: mcpSession.endpoint,
+          headers: { Authorization: mcpSession.authorizationHeader },
+          oauth: false as const,
+        },
+      }
+    : undefined;
+};
+
 export function makeOpenCodeAdapter(
   openCodeSettings: OpenCodeSettings,
   options?: OpenCodeAdapterLiveOptions,
@@ -2843,20 +2858,9 @@ export function makeOpenCodeAdapter(
                 directory,
                 ...(server.serverPassword ? { serverPassword: server.serverPassword } : {}),
               });
-              if (mcpSession && !server.external) {
-                yield* runOpenCodeSdk("mcp.add", () =>
-                  client.mcp.add({
-                    name: "t3-code",
-                    config: {
-                      type: "remote",
-                      url: mcpSession.endpoint,
-                      headers: {
-                        Authorization: mcpSession.authorizationHeader,
-                      },
-                      oauth: false,
-                    },
-                  }),
-                );
+              const mcp = openCodeMcpForThread(input.threadId);
+              if (mcp && !server.external) {
+                yield* runOpenCodeSdk("mcp.add", () => client.mcp.add(mcp));
               }
               // Resume: re-adopt the session named by the durable cursor —
               // OpenCode scopes history by session id. The probe recovers only

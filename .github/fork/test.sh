@@ -52,6 +52,16 @@ assert_fails_with() {
   fi
 }
 
+for supported_mcp_adapter in Claude Codex Cursor Grok OpenCode; do
+  adapter_path="apps/server/src/provider/Layers/${supported_mcp_adapter}Adapter.ts"
+  if ! grep --fixed-strings --line-regexp --quiet -- "$adapter_path" \
+    "${repo_root}/.github/fork/allowlist.txt"; then
+    echo "FAIL allowlist-covers-supported-mcp-adapters: missing ${adapter_path}" >&2
+    exit 1
+  fi
+done
+echo "PASS allowlist-covers-supported-mcp-adapters"
+
 allowlist_repo="${fixture_root}/allowlist"
 mkdir -p "${allowlist_repo}/.github/fork" "${allowlist_repo}/apps/server/src/mcp"
 git -C "$allowlist_repo" init --quiet
