@@ -2732,7 +2732,6 @@ export const mcpRuntimeOptionsForThread = (
   const internalSession = mcpSession?.source === "internal" ? mcpSession : undefined;
   return mcpSession
     ? {
-        browserToolsAvailable: mcpSession.browserToolsAvailable,
         environment: {
           ...McpProviderSession.withAgentDeviceEnvironment(environment, internalSession),
           T3_MCP_BEARER_TOKEN: mcpSession.authorizationHeader.replace(/^Bearer\s+/, ""),

@@ -105,6 +105,58 @@ it.effect("rejects external MCP registration without orchestration operate scope
   ),
 );
 
+it.effect("rejects unauthenticated external MCP clear without changing the thread", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      McpProviderSession.clearAllMcpProviderSessions();
+      McpProviderSession.setExternalMcpProviderSession({
+        threadId,
+        endpoint,
+        authorizationHeader,
+      });
+      yield* serve.pipe(Layer.build);
+      const client = yield* HttpClient.HttpClient;
+      const response = yield* client.del(EXTERNAL_MCP_REGISTRATION_PATH, {
+        body: HttpBody.jsonUnsafe({ threadId }),
+      });
+
+      expect(response.status, yield* response.text).toBe(401);
+      expect(McpProviderSession.readMcpProviderSessionIncludingExternal(threadId)?.source).toBe(
+        "external",
+      );
+    }),
+  ).pipe(
+    Effect.provide(
+      Layer.mergeAll(authLayer("missing"), NodeHttpServer.layerTest, NodeServices.layer),
+    ),
+  ),
+);
+
+it.effect("rejects external MCP clear without orchestration operate scope", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      McpProviderSession.clearAllMcpProviderSessions();
+      McpProviderSession.setExternalMcpProviderSession({
+        threadId,
+        endpoint,
+        authorizationHeader,
+      });
+      yield* serve.pipe(Layer.build);
+      const client = yield* HttpClient.HttpClient;
+      const response = yield* client.del(EXTERNAL_MCP_REGISTRATION_PATH, {
+        body: HttpBody.jsonUnsafe({ threadId }),
+      });
+
+      expect(response.status, yield* response.text).toBe(403);
+      expect(McpProviderSession.readMcpProviderSessionIncludingExternal(threadId)?.source).toBe(
+        "external",
+      );
+    }),
+  ).pipe(
+    Effect.provide(Layer.mergeAll(authLayer("read"), NodeHttpServer.layerTest, NodeServices.layer)),
+  ),
+);
+
 it.effect("rejects a non-HTTP external MCP endpoint", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -194,6 +246,10 @@ it.effect("registers, plumbs, and clears one external MCP session for Claude and
 
       expect(register.status, yield* register.text).toBe(204);
       expect(McpProviderSession.readMcpProviderSession(threadId)).toBeUndefined();
+      expect(McpProviderSession.readMcpProviderSessionIncludingExternal(threadId)).toMatchObject({
+        source: "external",
+        browserToolsAvailable: false,
+      });
       expect(mcpServerForThread(threadId)).toEqual({
         "t3-code": {
           type: "http",
@@ -202,7 +258,6 @@ it.effect("registers, plumbs, and clears one external MCP session for Claude and
         },
       });
       expect(mcpRuntimeOptionsForThread(threadId, { EXISTING: "kept" })).toEqual({
-        browserToolsAvailable: false,
         environment: {
           EXISTING: "kept",
           T3_MCP_BEARER_TOKEN: "token-alpha",
