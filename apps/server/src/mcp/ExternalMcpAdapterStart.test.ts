@@ -34,6 +34,8 @@ import * as McpProviderSession from "./McpProviderSession.ts";
 const threadId = ThreadId.make("thread-start-evidence");
 const endpoint = "https://service.example.test/api";
 const authorizationHeader = "Bearer token-alpha";
+const secondaryEndpoint = "https://other.example.test/api";
+const secondaryAuthorizationHeader = "Bearer token-gamma";
 const internalEndpoint = "http://127.0.0.1/internal";
 const internalAuthorizationHeader = "Bearer token-beta";
 const claudeSettings = Schema.decodeSync(ClaudeSettings)({});
@@ -65,6 +67,12 @@ const arrange = () => {
     threadId,
     endpoint,
     authorizationHeader,
+  });
+  McpProviderSession.setExternalMcpProviderSession({
+    name: "workflow-two",
+    threadId,
+    endpoint: secondaryEndpoint,
+    authorizationHeader: secondaryAuthorizationHeader,
   });
 };
 
@@ -115,6 +123,11 @@ it.effect("passes external MCP through the real Claude startSession query call s
         url: endpoint,
         headers: { Authorization: authorizationHeader },
       },
+      "workflow-two": {
+        type: "http",
+        url: secondaryEndpoint,
+        headers: { Authorization: secondaryAuthorizationHeader },
+      },
     });
   }).pipe(Effect.provide(dependencies)),
 );
@@ -140,6 +153,8 @@ it.effect("passes external MCP through the real Codex startSession runtime call 
     expect(captured?.appServerArgs).toContain(`mcp_servers.external.url=${endpoint}`);
     expect(captured?.environment?.T3_MCP_BEARER_TOKEN_T3_CODE).toBe("token-beta");
     expect(captured?.environment?.T3_MCP_BEARER_TOKEN_EXTERNAL).toBe("token-alpha");
+    expect(captured?.appServerArgs).toContain(`mcp_servers.workflow-two.url=${secondaryEndpoint}`);
+    expect(captured?.environment?.T3_MCP_BEARER_TOKEN_WORKFLOW_TWO).toBe("token-gamma");
     expect(captured?.browserToolsAvailable).toBe(true);
     expect(browserToolsAvailableForSession(captured!)).toBe(true);
   }).pipe(Effect.provide(dependencies)),
@@ -200,6 +215,12 @@ it.effect("passes external MCP through the real Cursor startSession ACP call sit
         url: endpoint,
         headers: [{ name: "Authorization", value: authorizationHeader }],
       },
+      {
+        type: "http",
+        name: "workflow-two",
+        url: secondaryEndpoint,
+        headers: [{ name: "Authorization", value: secondaryAuthorizationHeader }],
+      },
     ]);
   }).pipe(Effect.provide(dependencies)),
 );
@@ -235,6 +256,12 @@ it.effect("passes external MCP through the real Grok startSession ACP call site"
         url: endpoint,
         headers: [{ name: "Authorization", value: authorizationHeader }],
       },
+      {
+        type: "http",
+        name: "workflow-two",
+        url: secondaryEndpoint,
+        headers: [{ name: "Authorization", value: secondaryAuthorizationHeader }],
+      },
     ]);
   }).pipe(Effect.provide(dependencies)),
 );
@@ -267,6 +294,15 @@ it.effect("passes external MCP through the real OpenCode startSession SDK call s
           type: "remote",
           url: endpoint,
           headers: { Authorization: authorizationHeader },
+          oauth: false,
+        },
+      },
+      {
+        name: "workflow-two",
+        config: {
+          type: "remote",
+          url: secondaryEndpoint,
+          headers: { Authorization: secondaryAuthorizationHeader },
           oauth: false,
         },
       },

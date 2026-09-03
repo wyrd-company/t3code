@@ -339,20 +339,21 @@ it.effect("clears only the named external MCP entry and preserves the internal e
         authorizationHeader: "Bearer token-internal",
         browserToolsAvailable: true,
       });
-      McpProviderSession.setExternalMcpProviderSession({
-        name: "workflow-one",
-        threadId,
-        endpoint,
-        authorizationHeader,
-      });
-      McpProviderSession.setExternalMcpProviderSession({
-        name: "workflow-two",
-        threadId,
-        endpoint: "https://service.example.test/other",
-        authorizationHeader: "Bearer token-other",
-      });
       yield* serve.pipe(Layer.build);
       const client = yield* HttpClient.HttpClient;
+      for (const registration of [
+        { name: "workflow-one", endpoint, authorizationHeader },
+        {
+          name: "workflow-two",
+          endpoint: "https://service.example.test/other",
+          authorizationHeader: "Bearer token-other",
+        },
+      ]) {
+        const registered = yield* client.put(EXTERNAL_MCP_REGISTRATION_PATH, {
+          body: HttpBody.jsonUnsafe({ threadId, ...registration }),
+        });
+        expect(registered.status).toBe(204);
+      }
       const response = yield* client.del(EXTERNAL_MCP_REGISTRATION_PATH, {
         body: HttpBody.jsonUnsafe({ threadId, name: "workflow-one" }),
       });
