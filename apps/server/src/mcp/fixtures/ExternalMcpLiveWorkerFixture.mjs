@@ -106,7 +106,13 @@ switch (mode) {
       { detached: true, stdio: "ignore" },
     );
     descendant.unref();
-    NodeFS.writeFileSync(descendantPidFile, String(hostPidForDirectChild(descendant.pid)));
+    NodeFS.writeFileSync(
+      descendantPidFile,
+      JSON.stringify({
+        hostPid: hostPidForDirectChild(descendant.pid),
+        namespacePid: descendant.pid,
+      }),
+    );
     write(result());
     process.exit(0);
     break;
