@@ -12,13 +12,13 @@ import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 export const EXTERNAL_MCP_REGISTRATION_PATH = "/api/mcp/provider-session";
 
 const ExternalMcpRegistration = Schema.Struct({
-  threadId: Schema.String.check(Schema.isMinLength(1)),
+  threadId: ThreadId,
   endpoint: Schema.String.check(Schema.isPattern(/^https?:\/\/[^\s]+$/u)),
   authorizationHeader: Schema.String.check(Schema.isPattern(/^Bearer\s+\S+$/u)),
 });
 
 const ExternalMcpClear = Schema.Struct({
-  threadId: Schema.String.check(Schema.isMinLength(1)),
+  threadId: ThreadId,
 });
 
 const decodeRegistration = Schema.decodeUnknownEffect(ExternalMcpRegistration);
@@ -88,7 +88,7 @@ const registerRoute = HttpRouter.add(
     const input = yield* request.json.pipe(Effect.flatMap(decodeRegistration), Effect.option);
     if (input._tag === "None") return invalidRequest;
 
-    const threadId = ThreadId.make(input.value.threadId);
+    const threadId = input.value.threadId;
     yield* McpSessionRegistry.revokeActiveMcpThread(threadId);
     yield* Effect.sync(() =>
       McpProviderSession.setExternalMcpProviderSession({
@@ -109,7 +109,7 @@ const clearRoute = HttpRouter.add(
     const input = yield* request.json.pipe(Effect.flatMap(decodeClear), Effect.option);
     if (input._tag === "None") return invalidRequest;
 
-    const threadId = ThreadId.make(input.value.threadId);
+    const threadId = input.value.threadId;
     yield* Effect.sync(() => McpProviderSession.clearExternalMcpProviderSession(threadId));
     return HttpServerResponse.empty({ status: 204 });
   }),
