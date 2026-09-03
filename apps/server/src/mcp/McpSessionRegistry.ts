@@ -54,6 +54,7 @@ interface CredentialRecord {
 
 interface RegistryState {
   readonly records: ReadonlyMap<string, CredentialRecord>;
+  readonly revocationFinalizers: ReadonlyMap<string, ReadonlySet<Effect.Effect<void>>>;
 }
 
 export interface McpSessionRegistryOptions {
@@ -102,8 +103,8 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
   const httpServer = yield* HttpServer.HttpServer;
   const state = yield* SynchronizedRef.make<RegistryState>({
     records: new Map(),
+    revocationFinalizers: new Map(),
   });
-  const revocationFinalizers = new Map<string, Set<Effect.Effect<void>>>();
   const currentTimeMillis = options.now ? Effect.sync(options.now) : Clock.currentTimeMillis;
   const livenessWindowMs = options.livenessWindowMs ?? DEFAULT_LIVENESS_WINDOW_MS;
   const endpoint =
@@ -139,10 +140,10 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
         capabilities: new Set(["preview"]),
         issuedAt,
       };
-      yield* SynchronizedRef.update(state, ({ records }) => {
+      yield* SynchronizedRef.update(state, ({ records, revocationFinalizers }) => {
         const next = new Map(pruneDead(records, issuedAt));
         next.set(tokenHash, { tokenHash, scope, lastAliveAt: issuedAt });
-        return { records: next };
+        return { records: next, revocationFinalizers };
       });
       return {
         config: {
@@ -165,13 +166,13 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
       if (rawToken.length === 0) return undefined;
       const tokenHash = yield* hashToken(rawToken);
       const timestamp = yield* currentTimeMillis;
-      return yield* SynchronizedRef.modify(state, ({ records }) => {
+      return yield* SynchronizedRef.modify(state, ({ records, revocationFinalizers }) => {
         const current = pruneDead(records, timestamp);
         const record = current.get(tokenHash);
-        if (!record) return [undefined, { records: current }] as const;
+        if (!record) return [undefined, { records: current, revocationFinalizers }] as const;
         const next = new Map(current);
         next.set(tokenHash, { ...record, lastAliveAt: timestamp });
-        return [record.scope, { records: next }] as const;
+        return [record.scope, { records: next, revocationFinalizers }] as const;
       });
     },
   );
@@ -179,7 +180,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
   const touch: McpSessionRegistryShape["touch"] = Effect.fn("McpSessionRegistry.touch")(
     function* (threadId) {
       const timestamp = yield* currentTimeMillis;
-      yield* SynchronizedRef.update(state, ({ records }) => {
+      yield* SynchronizedRef.update(state, ({ records, revocationFinalizers }) => {
         const current = pruneDead(records, timestamp);
         const next = new Map(current);
         for (const [tokenHash, record] of current) {
@@ -187,38 +188,35 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
             next.set(tokenHash, { ...record, lastAliveAt: timestamp });
           }
         }
-        return { records: next };
+        return { records: next, revocationFinalizers };
       });
     },
   );
 
   const revokeWhere = (predicate: (record: CredentialRecord) => boolean) =>
     Effect.gen(function* () {
-      const revokedSessionIds = yield* SynchronizedRef.modify(state, ({ records }) => {
-        const revoked = Array.from(records.values())
-          .filter(predicate)
-          .map((record) => record.scope.providerSessionId);
-        return [
-          revoked,
-          {
-            records: new Map(Array.from(records).filter(([, record]) => !predicate(record))),
-          },
-        ] as const;
-      });
-      yield* Effect.forEach(
-        new Set(revokedSessionIds),
-        (providerSessionId) =>
-          Effect.forEach(
-            revocationFinalizers.get(providerSessionId) ?? [],
-            (finalizer) => finalizer,
+      const revokedFinalizers = yield* SynchronizedRef.modify(
+        state,
+        ({ records, revocationFinalizers }) => {
+          const revokedSessionIds = Array.from(records.values())
+            .filter(predicate)
+            .map((record) => record.scope.providerSessionId);
+          const callbacks = revokedSessionIds.flatMap((providerSessionId) =>
+            Array.from(revocationFinalizers.get(providerSessionId) ?? []),
+          );
+          const nextFinalizers = new Map(revocationFinalizers);
+          for (const providerSessionId of revokedSessionIds)
+            nextFinalizers.delete(providerSessionId);
+          return [
+            callbacks,
             {
-              discard: true,
+              records: new Map(Array.from(records).filter(([, record]) => !predicate(record))),
+              revocationFinalizers: nextFinalizers,
             },
-          ).pipe(
-            Effect.ensuring(Effect.sync(() => revocationFinalizers.delete(providerSessionId))),
-          ),
-        { discard: true },
+          ] as const;
+        },
       );
+      yield* Effect.forEach(revokedFinalizers, (finalizer) => finalizer, { discard: true });
     });
 
   return McpSessionRegistry.of({
@@ -234,30 +232,44 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
       yield* revokeWhere((record) => record.scope.threadId === threadId);
     }),
     revokeAll: Effect.gen(function* () {
-      yield* SynchronizedRef.set(state, { records: new Map() });
-      yield* Effect.forEach(
-        revocationFinalizers.values(),
-        (finalizers) =>
-          Effect.forEach(finalizers, (finalizer) => finalizer, {
-            discard: true,
-          }),
-        { discard: true },
-      ).pipe(Effect.ensuring(Effect.sync(() => revocationFinalizers.clear())));
+      const finalizers = yield* SynchronizedRef.modify(
+        state,
+        ({ revocationFinalizers }) =>
+          [
+            Array.from(revocationFinalizers.values()).flatMap((callbacks) => Array.from(callbacks)),
+            {
+              records: new Map<string, CredentialRecord>(),
+              revocationFinalizers: new Map<string, ReadonlySet<Effect.Effect<void>>>(),
+            },
+          ] as const,
+      );
+      yield* Effect.forEach(finalizers, (finalizer) => finalizer, { discard: true });
     }),
-    onProviderSessionRevoked: (providerSessionId, finalizer) =>
-      Effect.acquireRelease(
-        Effect.sync(() => {
-          const finalizers = revocationFinalizers.get(providerSessionId) ?? new Set();
-          finalizers.add(finalizer);
-          revocationFinalizers.set(providerSessionId, finalizers);
+    onProviderSessionRevoked: (providerSessionId, finalizer) => {
+      const register: Effect.Effect<boolean> = SynchronizedRef.modifyEffect(
+        state,
+        ({ records, revocationFinalizers }) => {
+          const active = Array.from(records.values()).some(
+            (record) => record.scope.providerSessionId === providerSessionId,
+          );
+          if (!active)
+            return finalizer.pipe(Effect.as([false, { records, revocationFinalizers }] as const));
+          const next = new Map(revocationFinalizers);
+          next.set(providerSessionId, new Set(next.get(providerSessionId) ?? []).add(finalizer));
+          return Effect.succeed([true, { records, revocationFinalizers: next }] as const);
+        },
+      );
+      return Effect.acquireRelease(register, () =>
+        SynchronizedRef.update(state, ({ records, revocationFinalizers }) => {
+          const next = new Map(revocationFinalizers);
+          const callbacks = new Set(next.get(providerSessionId) ?? []);
+          callbacks.delete(finalizer);
+          if (callbacks.size === 0) next.delete(providerSessionId);
+          else next.set(providerSessionId, callbacks);
+          return { records, revocationFinalizers: next };
         }),
-        () =>
-          Effect.sync(() => {
-            const finalizers = revocationFinalizers.get(providerSessionId);
-            finalizers?.delete(finalizer);
-            if (finalizers?.size === 0) revocationFinalizers.delete(providerSessionId);
-          }),
-      ),
+      );
+    },
   });
 });
 
