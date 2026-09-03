@@ -35,6 +35,9 @@ switch (mode) {
   case "malformed":
     NodeFS.appendFileSync(resultFile, "{not-json}\n");
     break;
+  case "inconsistent-passed":
+    write(result({ reachedStage: "turn", reason: "stage-failed" }));
+    break;
   case "no-result":
     break;
   case "ignore-graceful":

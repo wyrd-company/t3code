@@ -30,25 +30,33 @@ export const ExternalMcpLiveWorkerStage = Schema.Literals([
 ]);
 export type ExternalMcpLiveWorkerStage = typeof ExternalMcpLiveWorkerStage.Type;
 
-export const ExternalMcpLiveWorkerReportedReason = Schema.Literals([
-  "all-assertions-passed",
+export const ExternalMcpLiveWorkerFailedReason = Schema.Literals([
   "harness-unavailable",
   "stage-failed",
   "stage-timed-out",
 ]);
-export type ExternalMcpLiveWorkerReportedReason = typeof ExternalMcpLiveWorkerReportedReason.Type;
+export type ExternalMcpLiveWorkerFailedReason = typeof ExternalMcpLiveWorkerFailedReason.Type;
 
-export const ExternalMcpLiveWorkerReportedResult = Schema.Struct({
-  protocol: Schema.Literal(EXTERNAL_MCP_LIVE_WORKER_PROTOCOL),
-  harness: ExternalMcpLiveHarness,
-  status: Schema.Literals(["passed", "failed"]),
-  reachedStage: ExternalMcpLiveWorkerStage,
-  reason: ExternalMcpLiveWorkerReportedReason,
-});
+export const ExternalMcpLiveWorkerReportedResult = Schema.Union([
+  Schema.Struct({
+    protocol: Schema.Literal(EXTERNAL_MCP_LIVE_WORKER_PROTOCOL),
+    harness: ExternalMcpLiveHarness,
+    status: Schema.Literal("passed"),
+    reachedStage: Schema.Literal("complete"),
+    reason: Schema.Literal("all-assertions-passed"),
+  }),
+  Schema.Struct({
+    protocol: Schema.Literal(EXTERNAL_MCP_LIVE_WORKER_PROTOCOL),
+    harness: ExternalMcpLiveHarness,
+    status: Schema.Literal("failed"),
+    reachedStage: ExternalMcpLiveWorkerStage,
+    reason: ExternalMcpLiveWorkerFailedReason,
+  }),
+]);
 export type ExternalMcpLiveWorkerReportedResult = typeof ExternalMcpLiveWorkerReportedResult.Type;
 
 export const ExternalMcpLiveWorkerParentReason = Schema.Union([
-  ExternalMcpLiveWorkerReportedReason,
+  ExternalMcpLiveWorkerFailedReason,
   Schema.Literals([
     "worker-spawn-failed",
     "worker-deadline-exceeded",
@@ -73,14 +81,24 @@ export const ExternalMcpLiveWorkerTeardown = Schema.Literals([
 ]);
 export type ExternalMcpLiveWorkerTeardown = typeof ExternalMcpLiveWorkerTeardown.Type;
 
-export const ExternalMcpLiveWorkerResult = Schema.Struct({
-  protocol: Schema.Literal(EXTERNAL_MCP_LIVE_WORKER_PROTOCOL),
-  harness: ExternalMcpLiveHarness,
-  status: Schema.Literals(["passed", "failed"]),
-  reachedStage: ExternalMcpLiveWorkerStage,
-  reason: ExternalMcpLiveWorkerParentReason,
-  teardown: ExternalMcpLiveWorkerTeardown,
-});
+export const ExternalMcpLiveWorkerResult = Schema.Union([
+  Schema.Struct({
+    protocol: Schema.Literal(EXTERNAL_MCP_LIVE_WORKER_PROTOCOL),
+    harness: ExternalMcpLiveHarness,
+    status: Schema.Literal("passed"),
+    reachedStage: Schema.Literal("complete"),
+    reason: Schema.Literal("all-assertions-passed"),
+    teardown: Schema.Literal("exited-without-signal"),
+  }),
+  Schema.Struct({
+    protocol: Schema.Literal(EXTERNAL_MCP_LIVE_WORKER_PROTOCOL),
+    harness: ExternalMcpLiveHarness,
+    status: Schema.Literal("failed"),
+    reachedStage: ExternalMcpLiveWorkerStage,
+    reason: ExternalMcpLiveWorkerParentReason,
+    teardown: ExternalMcpLiveWorkerTeardown,
+  }),
+]);
 export type ExternalMcpLiveWorkerResult = typeof ExternalMcpLiveWorkerResult.Type;
 
 const decodeReportedResult = Schema.decodeUnknownOption(ExternalMcpLiveWorkerReportedResult);
@@ -114,10 +132,17 @@ export function readExternalMcpLiveWorkerContext(
   return { harness: harness.value, resultFile };
 }
 
-export type ExternalMcpLiveWorkerReport = Omit<
-  ExternalMcpLiveWorkerReportedResult,
-  "protocol" | "harness"
->;
+export type ExternalMcpLiveWorkerReport =
+  | {
+      readonly status: "passed";
+      readonly reachedStage: "complete";
+      readonly reason: "all-assertions-passed";
+    }
+  | {
+      readonly status: "failed";
+      readonly reachedStage: ExternalMcpLiveWorkerStage;
+      readonly reason: ExternalMcpLiveWorkerFailedReason;
+    };
 
 /** Writes exactly one small, versioned result record before worker finalizers run. */
 export function publishExternalMcpLiveWorkerResult(
