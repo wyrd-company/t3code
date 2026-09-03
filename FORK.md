@@ -107,3 +107,21 @@ OpenCode installs per-thread MCP configuration only into a server process owned
 by that provider session. It does not install the endpoint into a configured
 external OpenCode server because that server can be shared across threads and
 would expose one thread's authorization header to other sessions.
+
+### Live coexistence probe
+
+The opt-in live probe starts real provider harnesses and verifies that an agent
+calls an authenticated external fixture tool while T3's internal browser-tool
+MCP service remains available in the same thread. It also exercises both
+registration orders and verifies that clearing the external entry leaves the
+internal entry available on the next session start.
+
+Run it from the repository root in a developer environment where the provider
+CLIs are installed and authenticated:
+
+```bash
+T3_EXTERNAL_MCP_LIVE_PROBE=1 pnpm exec vp test run apps/server/src/mcp/ExternalMcpLiveProbe.test.ts
+```
+
+The probe is deliberately excluded from CI. With
+`T3_EXTERNAL_MCP_LIVE_PROBE` unset, the live tests are skipped.
