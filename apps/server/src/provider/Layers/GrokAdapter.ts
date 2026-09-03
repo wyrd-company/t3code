@@ -114,6 +114,7 @@ export interface GrokAdapterLiveOptions {
   readonly turnInactivityTimeoutMs?: number;
   /** Override the longer active-tool liveness timeout in focused tests. */
   readonly activeToolInactivityTimeoutMs?: number;
+  readonly makeRuntime?: typeof makeGrokAcpRuntime;
 }
 
 interface PendingApproval {
@@ -1015,7 +1016,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           });
 
           const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
-          const acp = yield* makeGrokAcpRuntime(
+          const acp = yield* (options?.makeRuntime ?? makeGrokAcpRuntime)(
             attachGrokMcpForThread(input.threadId, {
               grokSettings,
               ...(options?.environment || mcpSession?.agentDeviceEnvironment

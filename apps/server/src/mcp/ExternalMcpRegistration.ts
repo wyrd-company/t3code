@@ -14,7 +14,7 @@ export const EXTERNAL_MCP_REGISTRATION_PATH = "/api/mcp/provider-session";
 const ExternalMcpRegistration = Schema.Struct({
   threadId: ThreadId,
   endpoint: Schema.String.check(Schema.isPattern(/^https?:\/\/[^\s]+$/u)),
-  authorizationHeader: Schema.String.check(Schema.isPattern(/^Bearer\s+\S+$/u)),
+  authorizationHeader: Schema.String.check(Schema.isPattern(/^Bearer [^\s\r\n]{1,8192}$/u)),
 });
 
 const ExternalMcpClear = Schema.Struct({
