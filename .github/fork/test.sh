@@ -79,6 +79,15 @@ for mcp_dependency_file in apps/server/package.json pnpm-lock.yaml; do
 done
 echo "PASS allowlist-covers-mcp-sdk-dependency"
 
+while IFS= read -r allowed_path; do
+  [[ -z "$allowed_path" || "$allowed_path" == \#* || "$allowed_path" == */ ]] && continue
+  if ! grep --fixed-strings --quiet -- "\`${allowed_path}\`" "${repo_root}/FORK.md"; then
+    echo "FAIL fork-doc-matches-exact-allowlist: missing ${allowed_path}" >&2
+    exit 1
+  fi
+done <"${repo_root}/.github/fork/allowlist.txt"
+echo "PASS fork-doc-matches-exact-allowlist"
+
 allowlist_repo="${fixture_root}/allowlist"
 mkdir -p "${allowlist_repo}/.github/fork" "${allowlist_repo}/apps/server/src/mcp"
 git -C "$allowlist_repo" init --quiet
