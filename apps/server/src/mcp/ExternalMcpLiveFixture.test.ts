@@ -20,6 +20,7 @@ afterEach(async () => {
 });
 
 const rpc = (method: string, params: unknown, id = 1) =>
+  // @effect-diagnostics-next-line globalFetch:off -- exercises a native Node fixture outside Effect.
   fetch(fixture!.endpoint, {
     method: "POST",
     headers: {
@@ -34,7 +35,9 @@ describe("external MCP live fixture", () => {
   it("rejects requests without the exact registered Bearer credential", async () => {
     fixture = await startExternalMcpLiveFixture({ authorizationHeader, nonce });
 
+    // @effect-diagnostics-next-line globalFetch:off -- exercises a native Node fixture outside Effect.
     const missing = await fetch(fixture.endpoint, { method: "POST" });
+    // @effect-diagnostics-next-line globalFetch:off -- exercises a native Node fixture outside Effect.
     const wrong = await fetch(fixture.endpoint, {
       method: "POST",
       headers: { authorization: "Bearer wrong-credential" },
