@@ -213,6 +213,24 @@ describe("external MCP live worker boundary", () => {
     }
   });
 
+  it("awaits final exit before returning from graceful termination", async () => {
+    let handle: ExternalMcpLiveWorkerProcessHandle | undefined;
+    const result = await runFixture("delayed-graceful", {
+      deadlineMs: 100,
+      graceMs: 300,
+      onSpawn: (spawned) => {
+        handle = spawned;
+      },
+    });
+    expect(result).toMatchObject({
+      status: "failed",
+      reason: "worker-deadline-exceeded",
+      teardown: "terminated-gracefully",
+    });
+    expect(handle).toBeDefined();
+    expect(processExists(handle!.pid)).toBe(false);
+  });
+
   it("kills a live descendant by the recorded group and returns only after both PIDs are gone", async () => {
     const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-worker-descendant-"));
     const descendantPidFile = NodePath.join(root, "descendant-pid");

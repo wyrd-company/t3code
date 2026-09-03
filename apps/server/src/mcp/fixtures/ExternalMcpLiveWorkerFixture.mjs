@@ -44,6 +44,10 @@ switch (mode) {
     process.on("SIGTERM", () => recordSignal("SIGTERM"));
     stayAlive();
     break;
+  case "delayed-graceful":
+    process.on("SIGTERM", () => setTimeout(() => process.exit(0), 100));
+    stayAlive();
+    break;
   case "stuck-finalizer":
     write(result());
     process.on("SIGTERM", () => recordSignal("SIGTERM"));
