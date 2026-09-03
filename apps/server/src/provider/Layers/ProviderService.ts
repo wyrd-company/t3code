@@ -261,8 +261,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
   const prepareMcpSession = (threadId: ThreadId, providerInstanceId: ProviderInstanceId) =>
     Effect.gen(function* () {
-      const registered = McpProviderSession.readMcpProviderSessionIncludingExternal(threadId);
-      if (registered?.source === "external") {
+      if (!McpProviderSession.shouldPrepareInternalMcpProviderSession(threadId)) {
         return undefined;
       }
       if (!(yield* agentBrowserAccessEnabled)) {
