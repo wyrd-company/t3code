@@ -2029,7 +2029,6 @@ export const mcpRuntimeOptionsForThread = (
   const mcpSession = McpProviderSession.readMcpProviderSessionIncludingExternal(threadId);
   return mcpSession
     ? {
-        browserToolsAvailable: mcpSession.browserToolsAvailable,
         environment: {
           ...environment,
           T3_MCP_BEARER_TOKEN: mcpSession.authorizationHeader.replace(/^Bearer\s+/, ""),
