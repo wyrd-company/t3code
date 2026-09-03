@@ -9,6 +9,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
@@ -56,9 +57,12 @@ const serverEnvironmentLayer = Layer.succeed(ServerEnvironment.ServerEnvironment
   getEnvironmentId: Effect.succeed(EnvironmentId.make("environment-server")),
   getDescriptor: Effect.die("unused"),
 });
+const mcpSessionRegistryLayer = McpSessionRegistry.layer.pipe(
+  Layer.provide(serverEnvironmentLayer),
+);
 const serve = HttpRouter.serve(
   McpHttpServer.layer.pipe(
-    Layer.provide(McpSessionRegistry.layer.pipe(Layer.provide(serverEnvironmentLayer))),
+    Layer.provide(mcpSessionRegistryLayer),
     Layer.provide(PreviewAutomationBroker.layer.pipe(Layer.provide(NodeServices.layer))),
   ),
   { disableListenLog: true, disableLogger: true },
@@ -205,6 +209,60 @@ it.effect("rejects a non-Bearer external MCP authorization header without return
       expect(response.status).toBe(400);
       expect(body).not.toContain(secret);
       expect(McpProviderSession.readMcpProviderSessionIncludingExternal(threadId)).toBeUndefined();
+    }),
+  ).pipe(
+    Effect.provide(
+      Layer.mergeAll(authLayer("operate"), NodeHttpServer.layerTest, NodeServices.layer),
+    ),
+  ),
+);
+
+it.effect("rejects whitespace, CRLF, and oversized Bearer authorization tokens", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      McpProviderSession.clearAllMcpProviderSessions();
+      yield* serve.pipe(Layer.build);
+      const client = yield* HttpClient.HttpClient;
+      for (const invalidHeader of [
+        "Bearer token with-spaces",
+        "Bearer token-alpha\r\nX-Injected: value",
+        `Bearer ${"x".repeat(8193)}`,
+      ]) {
+        const response = yield* client.put(EXTERNAL_MCP_REGISTRATION_PATH, {
+          body: HttpBody.jsonUnsafe({ threadId, endpoint, authorizationHeader: invalidHeader }),
+        });
+        expect(response.status).toBe(400);
+      }
+      expect(McpProviderSession.readMcpProviderSessionIncludingExternal(threadId)).toBeUndefined();
+    }),
+  ).pipe(
+    Effect.provide(
+      Layer.mergeAll(authLayer("operate"), NodeHttpServer.layerTest, NodeServices.layer),
+    ),
+  ),
+);
+
+it.effect("registering external MCP immediately revokes the active internal credential", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      McpProviderSession.clearAllMcpProviderSessions();
+      const services = yield* Layer.merge(serve, mcpSessionRegistryLayer).pipe(Layer.build);
+      const registry = Context.get(services, McpSessionRegistry.McpSessionRegistry);
+      const issued = yield* McpSessionRegistry.issueActiveMcpCredential({
+        threadId,
+        providerInstanceId: ProviderInstanceId.make("codex"),
+      });
+      const rawToken = issued?.config.authorizationHeader.slice("Bearer ".length);
+      expect(rawToken).toBeDefined();
+      expect(yield* registry.resolve(rawToken!)).toMatchObject({ threadId });
+
+      const client = yield* HttpClient.HttpClient;
+      const response = yield* client.put(EXTERNAL_MCP_REGISTRATION_PATH, {
+        body: registrationBody,
+      });
+
+      expect(response.status).toBe(204);
+      expect(yield* registry.resolve(rawToken!)).toBeUndefined();
     }),
   ).pipe(
     Effect.provide(
