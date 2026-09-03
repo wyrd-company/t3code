@@ -25,7 +25,10 @@ import { makeCursorAdapter } from "../provider/Layers/CursorAdapter.ts";
 import { makeGrokAdapter } from "../provider/Layers/GrokAdapter.ts";
 import { makeOpenCodeAdapter } from "../provider/Layers/OpenCodeAdapter.ts";
 import { OpenCodeRuntime, type OpenCodeRuntimeShape } from "../provider/opencodeRuntime.ts";
-import type { CodexSessionRuntimeOptions } from "../provider/Layers/CodexSessionRuntime.ts";
+import {
+  browserToolsAvailableForSession,
+  type CodexSessionRuntimeOptions,
+} from "../provider/Layers/CodexSessionRuntime.ts";
 import * as McpProviderSession from "./McpProviderSession.ts";
 
 const threadId = ThreadId.make("thread-start-evidence");
@@ -137,7 +140,32 @@ it.effect("passes external MCP through the real Codex startSession runtime call 
     expect(captured?.appServerArgs).toContain(`mcp_servers.external.url=${endpoint}`);
     expect(captured?.environment?.T3_MCP_BEARER_TOKEN_T3_CODE).toBe("token-beta");
     expect(captured?.environment?.T3_MCP_BEARER_TOKEN_EXTERNAL).toBe("token-alpha");
-    expect(McpProviderSession.hasInternalMcpProviderSession(threadId)).toBe(true);
+    expect(captured?.browserToolsAvailable).toBe(true);
+    expect(browserToolsAvailableForSession(captured!)).toBe(true);
+  }).pipe(Effect.provide(dependencies)),
+);
+
+it.effect("reports browser tools unavailable to Codex for an external-only MCP session", () =>
+  Effect.gen(function* () {
+    McpProviderSession.clearAllMcpProviderSessions();
+    McpProviderSession.setExternalMcpProviderSession({ threadId, endpoint, authorizationHeader });
+    let captured: CodexSessionRuntimeOptions | undefined;
+    const adapter = yield* makeCodexAdapter(codexSettings, {
+      makeRuntime: (input) => {
+        captured = input;
+        return Effect.die("capture complete");
+      },
+    });
+    yield* adapter
+      .startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        runtimeMode: "full-access",
+      })
+      .pipe(Effect.exit);
+
+    expect(captured?.browserToolsAvailable).toBe(false);
+    expect(browserToolsAvailableForSession(captured!)).toBe(false);
   }).pipe(Effect.provide(dependencies)),
 );
 
