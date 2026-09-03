@@ -4,6 +4,7 @@ import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Scope from "effect/Scope";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 import { HttpServer } from "effect/unstable/http";
 
@@ -34,6 +35,10 @@ export interface McpSessionRegistryShape {
   readonly revokeProviderSession: (providerSessionId: string) => Effect.Effect<void>;
   readonly revokeThread: (threadId: ThreadId) => Effect.Effect<void>;
   readonly revokeAll: Effect.Effect<void>;
+  readonly onProviderSessionRevoked: (
+    providerSessionId: string,
+    finalizer: Effect.Effect<void>,
+  ) => Effect.Effect<void, never, Scope.Scope>;
 }
 
 export class McpSessionRegistry extends Context.Service<
@@ -95,7 +100,10 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
   const environment = yield* ServerEnvironment.ServerEnvironment;
   const environmentId = yield* environment.getEnvironmentId;
   const httpServer = yield* HttpServer.HttpServer;
-  const state = yield* SynchronizedRef.make<RegistryState>({ records: new Map() });
+  const state = yield* SynchronizedRef.make<RegistryState>({
+    records: new Map(),
+  });
+  const revocationFinalizers = new Map<string, Set<Effect.Effect<void>>>();
   const currentTimeMillis = options.now ? Effect.sync(options.now) : Clock.currentTimeMillis;
   const livenessWindowMs = options.livenessWindowMs ?? DEFAULT_LIVENESS_WINDOW_MS;
   const endpoint =
@@ -185,9 +193,33 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
   );
 
   const revokeWhere = (predicate: (record: CredentialRecord) => boolean) =>
-    SynchronizedRef.update(state, ({ records }) => ({
-      records: new Map(Array.from(records).filter(([, record]) => !predicate(record))),
-    }));
+    Effect.gen(function* () {
+      const revokedSessionIds = yield* SynchronizedRef.modify(state, ({ records }) => {
+        const revoked = Array.from(records.values())
+          .filter(predicate)
+          .map((record) => record.scope.providerSessionId);
+        return [
+          revoked,
+          {
+            records: new Map(Array.from(records).filter(([, record]) => !predicate(record))),
+          },
+        ] as const;
+      });
+      yield* Effect.forEach(
+        new Set(revokedSessionIds),
+        (providerSessionId) =>
+          Effect.forEach(
+            revocationFinalizers.get(providerSessionId) ?? [],
+            (finalizer) => finalizer,
+            {
+              discard: true,
+            },
+          ).pipe(
+            Effect.ensuring(Effect.sync(() => revocationFinalizers.delete(providerSessionId))),
+          ),
+        { discard: true },
+      );
+    });
 
   return McpSessionRegistry.of({
     issue,
@@ -201,7 +233,31 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
     revokeThread: Effect.fn("McpSessionRegistry.revokeThread")(function* (threadId) {
       yield* revokeWhere((record) => record.scope.threadId === threadId);
     }),
-    revokeAll: SynchronizedRef.set(state, { records: new Map() }),
+    revokeAll: Effect.gen(function* () {
+      yield* SynchronizedRef.set(state, { records: new Map() });
+      yield* Effect.forEach(
+        revocationFinalizers.values(),
+        (finalizers) =>
+          Effect.forEach(finalizers, (finalizer) => finalizer, {
+            discard: true,
+          }),
+        { discard: true },
+      ).pipe(Effect.ensuring(Effect.sync(() => revocationFinalizers.clear())));
+    }),
+    onProviderSessionRevoked: (providerSessionId, finalizer) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          const finalizers = revocationFinalizers.get(providerSessionId) ?? new Set();
+          finalizers.add(finalizer);
+          revocationFinalizers.set(providerSessionId, finalizers);
+        }),
+        () =>
+          Effect.sync(() => {
+            const finalizers = revocationFinalizers.get(providerSessionId);
+            finalizers?.delete(finalizer);
+            if (finalizers?.size === 0) revocationFinalizers.delete(providerSessionId);
+          }),
+      ),
   });
 });
 
@@ -246,6 +302,19 @@ export const revokeActiveMcpThread = (threadId: ThreadId): Effect.Effect<void> =
 
 export const revokeAllActiveMcpCredentials = (): Effect.Effect<void> =>
   activeMcpSessionRegistry ? activeMcpSessionRegistry.revokeAll : Effect.void;
+
+export const resolveActiveMcpCredential = (
+  rawToken: string,
+): Effect.Effect<McpInvocationContext.McpInvocationScope | undefined> =>
+  activeMcpSessionRegistry ? activeMcpSessionRegistry.resolve(rawToken) : Effect.succeed(undefined);
+
+export const onActiveMcpProviderSessionRevoked = (
+  providerSessionId: string,
+  finalizer: Effect.Effect<void>,
+): Effect.Effect<void, never, Scope.Scope> =>
+  activeMcpSessionRegistry
+    ? activeMcpSessionRegistry.onProviderSessionRevoked(providerSessionId, finalizer)
+    : Effect.void;
 
 /** Exposed for tests. */
 export const __testing = {
