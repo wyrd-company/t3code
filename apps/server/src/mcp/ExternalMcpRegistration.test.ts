@@ -1,4 +1,5 @@
 import { NodeHttpServer } from "@effect/platform-node";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
@@ -13,10 +14,14 @@ import * as Layer from "effect/Layer";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import { mcpServerForThread } from "../provider/Layers/ClaudeAdapter.ts";
 import { mcpRuntimeOptionsForThread } from "../provider/Layers/CodexAdapter.ts";
-import { EXTERNAL_MCP_REGISTRATION_PATH, layer } from "./ExternalMcpRegistration.ts";
+import { EXTERNAL_MCP_REGISTRATION_PATH } from "./ExternalMcpRegistration.ts";
+import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpProviderSession from "./McpProviderSession.ts";
+import * as McpSessionRegistry from "./McpSessionRegistry.ts";
+import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
 
 const threadId = ThreadId.make("thread-alpha");
 const alternateThreadId = ThreadId.make("thread-beta");
@@ -44,7 +49,17 @@ const authLayer = (access: "missing" | "read" | "operate") =>
         : Effect.fail(new EnvironmentAuth.ServerAuthMissingCredentialError()),
   } as unknown as EnvironmentAuth.EnvironmentAuth["Service"]);
 
-const serve = HttpRouter.serve(layer, { disableListenLog: true, disableLogger: true });
+const serverEnvironmentLayer = Layer.succeed(ServerEnvironment.ServerEnvironment, {
+  getEnvironmentId: Effect.succeed(EnvironmentId.make("environment-server")),
+  getDescriptor: Effect.die("unused"),
+});
+const serve = HttpRouter.serve(
+  McpHttpServer.layer.pipe(
+    Layer.provide(McpSessionRegistry.layer.pipe(Layer.provide(serverEnvironmentLayer))),
+    Layer.provide(PreviewAutomationBroker.layer.pipe(Layer.provide(NodeServices.layer))),
+  ),
+  { disableListenLog: true, disableLogger: true },
+);
 
 const registrationBody = HttpBody.jsonUnsafe({
   threadId,
