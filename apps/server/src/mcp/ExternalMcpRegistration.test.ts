@@ -12,6 +12,7 @@ import { expect, it } from "@effect/vitest";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Scope from "effect/Scope";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
@@ -229,7 +230,11 @@ it.effect("rejects whitespace, CRLF, and oversized Bearer authorization tokens",
         `Bearer ${"x".repeat(8193)}`,
       ]) {
         const response = yield* client.put(EXTERNAL_MCP_REGISTRATION_PATH, {
-          body: HttpBody.jsonUnsafe({ threadId, endpoint, authorizationHeader: invalidHeader }),
+          body: HttpBody.jsonUnsafe({
+            threadId,
+            endpoint,
+            authorizationHeader: invalidHeader,
+          }),
         });
         expect(response.status).toBe(400);
       }
@@ -414,7 +419,11 @@ it.effect("registers and clears one external MCP session through the mounted ser
 
 const arrangeExternalRegistration = () => {
   McpProviderSession.clearAllMcpProviderSessions();
-  McpProviderSession.setExternalMcpProviderSession({ threadId, endpoint, authorizationHeader });
+  McpProviderSession.setExternalMcpProviderSession({
+    threadId,
+    endpoint,
+    authorizationHeader,
+  });
 };
 
 it("attaches external MCP through the Claude Agent SDK query options", () => {
@@ -458,13 +467,18 @@ const acpMcpServers = [
   },
 ];
 
-it("attaches external MCP through the Cursor ACP runtime input", () => {
-  arrangeExternalRegistration();
-  expect(attachCursorMcpForThread(threadId, { marker: "cursor" })).toEqual({
-    marker: "cursor",
-    mcpServers: acpMcpServers,
-  });
-});
+it.effect("attaches a sole external MCP through the Cursor ACP runtime input", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      arrangeExternalRegistration();
+      const scope = yield* Scope.make();
+      expect(yield* attachCursorMcpForThread(threadId, { marker: "cursor" }, scope)).toEqual({
+        marker: "cursor",
+        mcpServers: acpMcpServers,
+      });
+    }),
+  ),
+);
 
 it("attaches external MCP through the Grok ACP runtime input", () => {
   arrangeExternalRegistration();
@@ -542,7 +556,11 @@ it("keeps internal and external MCP entries additive in either registration orde
     authorizationHeader: "Bearer token-beta",
     browserToolsAvailable: true,
   });
-  McpProviderSession.setExternalMcpProviderSession({ threadId, endpoint, authorizationHeader });
+  McpProviderSession.setExternalMcpProviderSession({
+    threadId,
+    endpoint,
+    authorizationHeader,
+  });
   expect(McpProviderSession.readMcpProviderSessions(threadId).map(({ name }) => name)).toEqual([
     "t3-code",
     "external",
