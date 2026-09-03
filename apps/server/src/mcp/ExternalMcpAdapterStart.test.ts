@@ -163,7 +163,11 @@ it.effect("passes external MCP through the real Codex startSession runtime call 
 it.effect("reports browser tools unavailable to Codex for an external-only MCP session", () =>
   Effect.gen(function* () {
     McpProviderSession.clearAllMcpProviderSessions();
-    McpProviderSession.setExternalMcpProviderSession({ threadId, endpoint, authorizationHeader });
+    McpProviderSession.setExternalMcpProviderSession({
+      threadId,
+      endpoint,
+      authorizationHeader,
+    });
     let captured: CodexSessionRuntimeOptions | undefined;
     const adapter = yield* makeCodexAdapter(codexSettings, {
       makeRuntime: (input) => {
@@ -188,7 +192,16 @@ it.effect("passes external MCP through the real Cursor startSession ACP call sit
   Effect.gen(function* () {
     arrange();
     let captured: CursorAcpRuntimeInput | undefined;
+    let gatewaySnapshot: ReadonlyArray<McpProviderSession.McpProviderSessionConfig> = [];
     const adapter = yield* makeCursorAdapter(cursorSettings, {
+      makeMcpGateway: ({ sessions }) => {
+        gatewaySnapshot = sessions;
+        return Effect.succeed({
+          name: McpProviderSession.INTERNAL_MCP_SERVER_NAME,
+          endpoint: "http://127.0.0.1:43124/mcp",
+          authorizationHeader: internalAuthorizationHeader,
+        });
+      },
       makeRuntime: (input) => {
         captured = input;
         return Effect.die("capture complete");
@@ -206,21 +219,14 @@ it.effect("passes external MCP through the real Cursor startSession ACP call sit
       {
         type: "http",
         name: "t3-code",
-        url: internalEndpoint,
+        url: "http://127.0.0.1:43124/mcp",
         headers: [{ name: "Authorization", value: internalAuthorizationHeader }],
       },
-      {
-        type: "http",
-        name: "external",
-        url: endpoint,
-        headers: [{ name: "Authorization", value: authorizationHeader }],
-      },
-      {
-        type: "http",
-        name: "workflow-two",
-        url: secondaryEndpoint,
-        headers: [{ name: "Authorization", value: secondaryAuthorizationHeader }],
-      },
+    ]);
+    expect(gatewaySnapshot.map(({ name }) => name)).toEqual([
+      "t3-code",
+      "external",
+      "workflow-two",
     ]);
   }).pipe(Effect.provide(dependencies)),
 );
