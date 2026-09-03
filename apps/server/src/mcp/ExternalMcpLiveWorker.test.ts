@@ -177,6 +177,14 @@ describe("external MCP live worker boundary", () => {
     });
   });
 
+  it("rejects an internally inconsistent passed result", async () => {
+    expect(await runFixture("inconsistent-passed")).toMatchObject({
+      status: "failed",
+      reason: "malformed-worker-result",
+      teardown: "exited-without-signal",
+    });
+  });
+
   it("rejects a missing worker result", async () => {
     expect(await runFixture("no-result")).toMatchObject({
       status: "failed",
