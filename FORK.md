@@ -125,3 +125,34 @@ T3_EXTERNAL_MCP_LIVE_PROBE=1 pnpm exec vp test run apps/server/src/mcp/ExternalM
 
 The probe is deliberately excluded from CI. With
 `T3_EXTERNAL_MCP_LIVE_PROBE` unset, the live tests are skipped.
+
+### Consumer-path live probe
+
+The probe above drives the server in-process. It proves the registration
+behaviour, but it never crosses the boundary a consumer crosses, so it cannot
+see a fault in packaging, publication, or transport.
+
+`apps/server/scripts/consumer-live-probe.sh` closes that gap. It builds a clean
+container that installs T3 Code the way a consumer does — the published
+`t3code-server` devcontainer Feature, resolving this fork's own latest release —
+and then, entirely from outside the server process:
+
+- issues a bearer session token with `t3 auth session issue`, the headless
+  entry point a consumer uses;
+- confirms unauthenticated external MCP registration is refused;
+- registers an MCP endpoint for a thread over `PUT /api/mcp/provider-session`;
+- starts a project and a turn over the RPC socket with
+  `orchestration.dispatchCommand`;
+- requires the agent to call the registered tool, evidenced by the fixture
+  server's own record of a call carrying that run's nonce;
+- requires the provider process to have received T3's internal `t3-code`
+  server alongside the external one, read from the provider's own argv.
+
+```bash
+apps/server/scripts/consumer-live-probe.sh
+```
+
+It needs Docker, the devcontainer CLI, and Codex credentials at
+`~/.codex/auth.json`, which are mounted read-only into the container. Run it on
+demand. It is never a CI or release gate: it spends real provider credentials
+and depends on a harness this repository does not control.
