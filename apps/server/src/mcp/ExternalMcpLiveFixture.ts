@@ -53,6 +53,13 @@ const rpcResult = (id: unknown, result: unknown) => ({
 export async function startExternalMcpLiveFixture(input: {
   readonly authorizationHeader: string;
   readonly nonce: string;
+  /**
+   * Interface to bind. Defaults to loopback. A probe whose T3 server runs in
+   * another network namespace must bind an interface that namespace can reach.
+   */
+  readonly hostname?: string;
+  /** Host the endpoint advertises, when it differs from the bound interface. */
+  readonly advertisedHost?: string;
 }): Promise<ExternalMcpLiveFixture> {
   const calls: Array<ExternalMcpLiveFixtureCall> = [];
   const server = NodeHttp.createServer(async (request, response) => {
@@ -168,7 +175,7 @@ export async function startExternalMcpLiveFixture(input: {
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
+    server.listen(0, input.hostname ?? "127.0.0.1", () => {
       server.off("error", reject);
       resolve();
     });
@@ -180,7 +187,7 @@ export async function startExternalMcpLiveFixture(input: {
   }
 
   return {
-    endpoint: `http://127.0.0.1:${address.port}/mcp`,
+    endpoint: `http://${input.advertisedHost ?? "127.0.0.1"}:${address.port}/mcp`,
     calls,
     stop: () =>
       new Promise<void>((resolve, reject) => {
