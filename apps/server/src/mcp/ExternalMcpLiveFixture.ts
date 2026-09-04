@@ -44,7 +44,11 @@ const writeJson = (response: NodeHttp.ServerResponse, status: number, payload: u
   response.end(body);
 };
 
-const rpcResult = (id: unknown, result: unknown) => ({ jsonrpc: "2.0", id, result });
+const rpcResult = (id: unknown, result: unknown) => ({
+  jsonrpc: "2.0",
+  id,
+  result,
+});
 
 export async function startExternalMcpLiveFixture(input: {
   readonly authorizationHeader: string;
@@ -96,7 +100,10 @@ export async function startExternalMcpLiveFixture(input: {
           protocolVersion:
             typeof params?.protocolVersion === "string" ? params.protocolVersion : "2025-06-18",
           capabilities: { tools: {} },
-          serverInfo: { name: "t3-external-mcp-live-fixture", version: "1.0.0" },
+          serverInfo: {
+            name: "t3-external-mcp-live-fixture",
+            version: "1.0.0",
+          },
         }),
       );
       return;
@@ -126,7 +133,10 @@ export async function startExternalMcpLiveFixture(input: {
 
     if (message.method === "tools/call") {
       const params = message.params as
-        | { readonly name?: unknown; readonly arguments?: { readonly nonce?: unknown } }
+        | {
+            readonly name?: unknown;
+            readonly arguments?: { readonly nonce?: unknown };
+          }
         | undefined;
       if (params?.name !== EXTERNAL_MCP_LIVE_TOOL_NAME || params.arguments?.nonce !== input.nonce) {
         writeJson(response, 200, {
@@ -173,8 +183,9 @@ export async function startExternalMcpLiveFixture(input: {
     endpoint: `http://127.0.0.1:${address.port}/mcp`,
     calls,
     stop: () =>
-      new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
-      ),
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+        server.closeAllConnections();
+      }),
   };
 }
