@@ -95,6 +95,7 @@ const claudeSettings = Schema.decodeSync(ClaudeSettings)({});
 const codexSettings = Schema.decodeSync(CodexSettings)({});
 const grokSettings = Schema.decodeSync(GrokSettings)({});
 const openCodeSettings = Schema.decodeSync(OpenCodeSettings)({});
+const BEST_EFFORT_WORKER_TEST_NAME = "runs one best-effort external MCP live worker";
 
 const authLayer = Layer.succeed(EnvironmentAuth.EnvironmentAuth, {
   authenticateHttpRequest: (request: HttpServerRequest.HttpServerRequest) =>
@@ -537,7 +538,7 @@ describe.runIf(process.env[EXTERNAL_MCP_LIVE_PROBE_ENV] === "1" && !isBestEffort
                     "run",
                     "apps/server/src/mcp/ExternalMcpLiveProbe.test.ts",
                     "-t",
-                    "runs one best-effort external MCP live worker",
+                    BEST_EFFORT_WORKER_TEST_NAME,
                   ],
                   cwd: process.cwd(),
                   environment: {
@@ -577,7 +578,7 @@ describe.runIf(process.env[EXTERNAL_MCP_LIVE_PROBE_ENV] === "1" && isBestEffortW
   "external MCP live probe worker",
   () => {
     it.effect(
-      "runs one best-effort external MCP live worker",
+      BEST_EFFORT_WORKER_TEST_NAME,
       () =>
         Effect.scoped(
           Effect.gen(function* () {
