@@ -2,15 +2,26 @@
 // relationships:
 //   validates: external-mcp-registration
 // ---
+// @effect-diagnostics nodeBuiltinImport:off -- this live test invokes the reviewed exact-process worker boundary.
+import * as NodePath from "node:path";
+
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { query as claudeQuery } from "@anthropic-ai/claude-agent-sdk";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
   AuthOrchestrationOperateScope,
   AuthSessionId,
-  EnvironmentId,
-  ProviderInstanceId,
-  ProviderDriverKind,
+  ClaudeSettings,
+  CodexSettings,
   CursorSettings,
+  defaultInstanceIdForDriver,
+  EnvironmentId,
+  GrokSettings,
+  OpenCodeSettings,
+  ProviderDriverKind,
+  ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
@@ -19,6 +30,7 @@ import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -35,7 +47,13 @@ import {
   makeCursorAcpRuntime,
   type CursorAcpRuntimeInput,
 } from "../provider/acp/CursorAcpSupport.ts";
+import { makeGrokAcpRuntime } from "../provider/acp/GrokAcpSupport.ts";
+import { makeClaudeAdapter } from "../provider/Layers/ClaudeAdapter.ts";
+import { makeCodexAdapter } from "../provider/Layers/CodexAdapter.ts";
+import { makeCodexSessionRuntime } from "../provider/Layers/CodexSessionRuntime.ts";
 import { makeCursorAdapter } from "../provider/Layers/CursorAdapter.ts";
+import { makeGrokAdapter } from "../provider/Layers/GrokAdapter.ts";
+import { makeOpenCodeAdapter } from "../provider/Layers/OpenCodeAdapter.ts";
 import * as ProviderEventLoggers from "../provider/Layers/ProviderEventLoggers.ts";
 import { makeProviderServiceLive } from "../provider/Layers/ProviderService.ts";
 import { ProviderSessionDirectoryLive } from "../provider/Layers/ProviderSessionDirectory.ts";
@@ -44,22 +62,39 @@ import type { ProviderAdapterShape } from "../provider/Services/ProviderAdapter.
 import * as ProviderAdapterRegistry from "../provider/Services/ProviderAdapterRegistry.ts";
 import * as ProviderService from "../provider/Services/ProviderService.ts";
 import { makeAdapterRegistryMock } from "../provider/testUtils/providerAdapterRegistryMock.ts";
+import { OpenCodeRuntime, OpenCodeRuntimeLive } from "../provider/opencodeRuntime.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
   EXTERNAL_MCP_LIVE_TOOL_NAME,
   startExternalMcpLiveFixture,
 } from "./ExternalMcpLiveFixture.ts";
+import {
+  EXTERNAL_MCP_LIVE_PROBE_ENV,
+  publishExternalMcpLiveWorkerResult,
+  readExternalMcpLiveWorkerContext,
+  runExternalMcpLiveWorker,
+  type ExternalMcpLiveHarness,
+  type ExternalMcpLiveWorkerProcessHandle,
+} from "./ExternalMcpLiveWorker.ts";
+import {
+  EXTERNAL_MCP_LIVE_WORKER_PROTOCOL_ENV,
+  type ExternalMcpLiveWorkerStage,
+} from "./ExternalMcpLiveWorkerProtocol.ts";
+import * as CursorMcpGateway from "./CursorMcpGateway.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpProviderSession from "./McpProviderSession.ts";
 import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
 
-const LIVE_PROBE_ENV = "T3_EXTERNAL_MCP_LIVE_PROBE";
 const externalName = "external";
 const operatorAuthorization = "Bearer generic-operator-credential";
 const cursorDriver = ProviderDriverKind.make("cursor");
 const cursorInstanceId = ProviderInstanceId.make("cursor");
 const cursorSettings = Schema.decodeSync(CursorSettings)({});
+const claudeSettings = Schema.decodeSync(ClaudeSettings)({});
+const codexSettings = Schema.decodeSync(CodexSettings)({});
+const grokSettings = Schema.decodeSync(GrokSettings)({});
+const openCodeSettings = Schema.decodeSync(OpenCodeSettings)({});
 
 const authLayer = Layer.succeed(EnvironmentAuth.EnvironmentAuth, {
   authenticateHttpRequest: (request: HttpServerRequest.HttpServerRequest) =>
@@ -131,10 +166,10 @@ const clearExternal = (client: HttpClient.HttpClient, threadId: ThreadId) =>
     body: HttpBody.jsonUnsafe({ threadId, name: externalName }),
   });
 
-const makeCursorProviderLayer = (adapter: ProviderAdapterShape<ProviderAdapterError>) => {
+const makeProviderLayer = (adapter: ProviderAdapterShape<ProviderAdapterError>) => {
   const adapterRegistryLayer = Layer.succeed(
     ProviderAdapterRegistry.ProviderAdapterRegistry,
-    makeAdapterRegistryMock({ [cursorDriver]: adapter }),
+    makeAdapterRegistryMock({ [adapter.provider]: adapter }),
   );
   const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
     Layer.provide(SqlitePersistenceMemory),
@@ -144,7 +179,9 @@ const makeCursorProviderLayer = (adapter: ProviderAdapterShape<ProviderAdapterEr
     Layer.provide(adapterRegistryLayer),
     Layer.provide(directoryLayer),
     Layer.provide(
-      ServerSettings.ServerSettingsService.layerTest({ enableAgentBrowserAccess: true }),
+      ServerSettings.ServerSettingsService.layerTest({
+        enableAgentBrowserAccess: true,
+      }),
     ),
     Layer.provide(serverConfigLayer),
     Layer.provide(AnalyticsService.layerTest),
@@ -195,77 +232,204 @@ const assertInternalEndpointAcceptsCredential = (
     }
   });
 
-describe.runIf(process.env[LIVE_PROBE_ENV] === "1")("external MCP live probe", () => {
-  it.effect("preserves external and internal MCP entries in both registration orders", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        McpProviderSession.clearAllMcpProviderSessions();
-        const services = yield* Layer.merge(serve, registryLayer).pipe(Layer.build);
-        Context.get(services, McpSessionRegistry.McpSessionRegistry);
-        const client = yield* HttpClient.HttpClient;
+const listGatewayToolNames = (config: CursorMcpGateway.CursorMcpGatewayConfig) =>
+  Effect.tryPromise(async () => {
+    const client = new Client({ name: "generic-live-probe", version: "1.0.0" });
+    try {
+      const transport = new StreamableHTTPClientTransport(new URL(config.endpoint), {
+        requestInit: {
+          headers: { Authorization: config.authorizationHeader },
+        },
+      });
+      await client.connect(transport as Parameters<Client["connect"]>[0]);
+      return (await client.listTools()).tools.map(({ name }) => name).sort();
+    } finally {
+      await client.close();
+    }
+  });
 
-        for (const order of ["external-first", "internal-first"] satisfies Array<ProbeOrder>) {
-          const threadId = ThreadId.make(`generic-live-probe-${order}`);
-          if (order === "external-first") {
-            const response = yield* registerExternal(client, {
-              threadId,
-              endpoint: "http://127.0.0.1:9/mcp",
-              authorizationHeader: "Bearer generic-fixture-credential",
-            });
-            expect(response.status).toBe(204);
-            yield* issueInternal(threadId);
-          } else {
-            yield* issueInternal(threadId);
-            const response = yield* registerExternal(client, {
-              threadId,
-              endpoint: "http://127.0.0.1:9/mcp",
-              authorizationHeader: "Bearer generic-fixture-credential",
-            });
-            expect(response.status).toBe(204);
-          }
+const mcpNamesFromCodexArgs = (args: ReadonlyArray<string> | undefined) =>
+  (args ?? []).flatMap((argument) => {
+    const match = /^mcp_servers\.([^.]+)\.url=/u.exec(argument);
+    return match?.[1] ? [match[1]] : [];
+  });
 
-          expect(readNames(threadId), order).toEqual([externalName, "t3-code"]);
-        }
-      }),
-    ).pipe(Effect.provide(Layer.mergeAll(authLayer, NodeHttpServer.layerTest, NodeServices.layer))),
-  );
+const makeBestEffortAdapter = (
+  harness: ExternalMcpLiveHarness,
+  nativeMcpNames: Array<ReadonlyArray<string>>,
+) =>
+  Effect.gen(function* () {
+    const cryptoService = yield* Crypto.Crypto;
+    switch (harness) {
+      case "claudeAgent":
+        return yield* makeClaudeAdapter(claudeSettings, {
+          createQuery: (input) => {
+            nativeMcpNames.push(Object.keys(input.options.mcpServers ?? {}).sort());
+            return claudeQuery(input) as never;
+          },
+        });
+      case "codex":
+        return yield* makeCodexAdapter(codexSettings, {
+          makeRuntime: (input) => {
+            nativeMcpNames.push(mcpNamesFromCodexArgs(input.appServerArgs).sort());
+            return makeCodexSessionRuntime(input).pipe(
+              Effect.provideService(Crypto.Crypto, cryptoService),
+            );
+          },
+        });
+      case "grok":
+        return yield* makeGrokAdapter(grokSettings, {
+          makeRuntime: (input) => {
+            nativeMcpNames.push((input.mcpServers ?? []).map(({ name }) => name).sort());
+            return makeGrokAcpRuntime(input);
+          },
+        });
+      case "opencode":
+        return yield* Effect.gen(function* () {
+          const runtime = yield* OpenCodeRuntime;
+          const capturingRuntime = {
+            ...runtime,
+            createOpenCodeSdkClient: (
+              input: Parameters<typeof runtime.createOpenCodeSdkClient>[0],
+            ) => {
+              const client = runtime.createOpenCodeSdkClient(input);
+              const names: Array<string> = [];
+              nativeMcpNames.push(names);
+              const mcp = client.mcp;
+              return new Proxy(client, {
+                get: (target, property, receiver) => {
+                  if (property !== "mcp") return Reflect.get(target, property, receiver);
+                  return {
+                    ...mcp,
+                    add: async (...args: Parameters<typeof mcp.add>) => {
+                      const name = args[0]?.name;
+                      if (name !== undefined) names.push(name);
+                      names.sort();
+                      return mcp.add(...args);
+                    },
+                  };
+                },
+              });
+            },
+          } satisfies OpenCodeRuntime["Service"];
+          return yield* makeOpenCodeAdapter(openCodeSettings).pipe(
+            Effect.provideService(OpenCodeRuntime, capturingRuntime),
+          );
+        }).pipe(Effect.provide(OpenCodeRuntimeLive));
+    }
+  }).pipe(Effect.provide(serverConfigLayer));
 
-  it.effect(
-    "calls the external tool while preserving T3 browser MCP through the real Cursor adapter",
-    () =>
+const failureTag = <E>(exit: Exit.Exit<unknown, E>): string => {
+  if (Exit.isSuccess(exit)) return "none";
+  const failure = exit.cause.reasons.find((reason) => reason._tag === "Fail");
+  if (failure?._tag !== "Fail") return "defect-or-interruption";
+  const error = failure.error;
+  return typeof error === "object" && error !== null && "_tag" in error
+    ? String(error._tag)
+    : "unclassified-failure";
+};
+
+const isBestEffortWorker = process.env[EXTERNAL_MCP_LIVE_WORKER_PROTOCOL_ENV] !== undefined;
+
+const processGroupIsAlive = (handle: ExternalMcpLiveWorkerProcessHandle): boolean => {
+  try {
+    process.kill(-handle.processGroupId, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
+  }
+};
+
+describe.runIf(process.env[EXTERNAL_MCP_LIVE_PROBE_ENV] === "1" && !isBestEffortWorker)(
+  "external MCP live probe",
+  () => {
+    it.effect("preserves external and internal MCP entries in both registration orders", () =>
       Effect.scoped(
         Effect.gen(function* () {
           McpProviderSession.clearAllMcpProviderSessions();
-          const serverServices = yield* Layer.merge(serve, registryLayer).pipe(Layer.build);
-          Context.get(serverServices, McpSessionRegistry.McpSessionRegistry);
+          const services = yield* Layer.merge(serve, registryLayer).pipe(Layer.build);
+          Context.get(services, McpSessionRegistry.McpSessionRegistry);
           const client = yield* HttpClient.HttpClient;
-          const capturedMcpNames: Array<ReadonlyArray<string>> = [];
-          const adapter = yield* makeCursorAdapter(cursorSettings, {
-            makeRuntime: (input: CursorAcpRuntimeInput) => {
-              capturedMcpNames.push((input.mcpServers ?? []).map(({ name }) => name).sort());
-              return makeCursorAcpRuntime(input);
-            },
-          }).pipe(Effect.provide(serverConfigLayer));
-          const providerServices = yield* makeCursorProviderLayer(adapter).pipe(Layer.build);
-          const provider = Context.get(providerServices, ProviderService.ProviderService);
 
-          const waitForTurn = (threadId: ThreadId, prompt: string) =>
-            Effect.gen(function* () {
-              const terminal = yield* Deferred.make<void>();
-              const eventFiber = yield* Stream.runForEach(provider.streamEvents, (event) =>
-                event.threadId === threadId && event.type === "turn.completed"
-                  ? Deferred.succeed(terminal, undefined).pipe(Effect.asVoid)
-                  : Effect.void,
-              ).pipe(Effect.forkChild);
-              yield* provider.sendTurn({ threadId, input: prompt, attachments: [] });
-              yield* Deferred.await(terminal).pipe(Effect.timeout("5 minutes"));
-              yield* Fiber.interrupt(eventFiber);
-            });
+          for (const order of ["external-first", "internal-first"] satisfies Array<ProbeOrder>) {
+            const threadId = ThreadId.make(`generic-live-probe-${order}`);
+            if (order === "external-first") {
+              const response = yield* registerExternal(client, {
+                threadId,
+                endpoint: "http://127.0.0.1:9/mcp",
+                authorizationHeader: "Bearer generic-fixture-credential",
+              });
+              expect(response.status).toBe(204);
+              yield* issueInternal(threadId);
+            } else {
+              yield* issueInternal(threadId);
+              const response = yield* registerExternal(client, {
+                threadId,
+                endpoint: "http://127.0.0.1:9/mcp",
+                authorizationHeader: "Bearer generic-fixture-credential",
+              });
+              expect(response.status).toBe(204);
+            }
 
-          const cryptoService = yield* Crypto.Crypto;
+            expect(readNames(threadId), order).toEqual([externalName, "t3-code"]);
+          }
+        }),
+      ).pipe(
+        Effect.provide(Layer.mergeAll(authLayer, NodeHttpServer.layerTest, NodeServices.layer)),
+      ),
+    );
 
-          for (const order of ["internal-first", "external-first"] satisfies Array<ProbeOrder>) {
-            const threadId = ThreadId.make(`generic-cursor-live-probe-${order}`);
+    it.effect(
+      "calls the external tool while preserving T3 browser MCP through the real Cursor adapter",
+      () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            McpProviderSession.clearAllMcpProviderSessions();
+            const serverServices = yield* Layer.merge(serve, registryLayer).pipe(Layer.build);
+            Context.get(serverServices, McpSessionRegistry.McpSessionRegistry);
+            const client = yield* HttpClient.HttpClient;
+            const capturedMcpNames: Array<ReadonlyArray<string>> = [];
+            const capturedNativeMcp: Array<CursorAcpRuntimeInput["mcpServers"]> = [];
+            const capturedGateways: Array<CursorMcpGateway.CursorMcpGatewayConfig> = [];
+            const adapter = yield* makeCursorAdapter(cursorSettings, {
+              makeRuntime: (input: CursorAcpRuntimeInput) => {
+                capturedMcpNames.push((input.mcpServers ?? []).map(({ name }) => name).sort());
+                capturedNativeMcp.push(input.mcpServers);
+                return makeCursorAcpRuntime(input);
+              },
+              makeMcpGateway: (input) =>
+                CursorMcpGateway.startCursorMcpGateway(input).pipe(
+                  Effect.tap((gateway) =>
+                    Effect.sync(() => {
+                      capturedGateways.push(gateway);
+                    }),
+                  ),
+                ),
+            }).pipe(Effect.provide(serverConfigLayer));
+            const providerServices = yield* makeProviderLayer(adapter).pipe(Layer.build);
+            const provider = Context.get(providerServices, ProviderService.ProviderService);
+
+            const waitForTurn = (threadId: ThreadId, prompt: string) =>
+              Effect.gen(function* () {
+                const terminal = yield* Deferred.make<void>();
+                const eventFiber = yield* Stream.runForEach(provider.streamEvents, (event) =>
+                  event.threadId === threadId && event.type === "turn.completed"
+                    ? Deferred.succeed(terminal, undefined).pipe(Effect.asVoid)
+                    : Effect.void,
+                ).pipe(Effect.forkChild);
+                yield* provider.sendTurn({
+                  threadId,
+                  input: prompt,
+                  attachments: [],
+                });
+                yield* Deferred.await(terminal).pipe(Effect.timeout("90 seconds"));
+                yield* Fiber.interrupt(eventFiber);
+              });
+
+            const cryptoService = yield* Crypto.Crypto;
+
+            const threadId = ThreadId.make("generic-cursor-live-probe-external-first");
             const nonce = yield* cryptoService.randomUUIDv4;
             const fixtureAuthorization = `Bearer ${yield* cryptoService.randomUUIDv4}`;
             const fixture = yield* Effect.acquireRelease(
@@ -277,18 +441,6 @@ describe.runIf(process.env[LIVE_PROBE_ENV] === "1")("external MCP live probe", (
               ),
               (running) => Effect.promise(() => running.stop()).pipe(Effect.ignore),
             );
-
-            if (order === "internal-first") {
-              yield* provider.startSession(threadId, {
-                threadId,
-                provider: cursorDriver,
-                providerInstanceId: cursorInstanceId,
-                cwd: process.cwd(),
-                runtimeMode: "full-access",
-              });
-              expect(capturedMcpNames.at(-1)).toEqual(["t3-code"]);
-              yield* provider.stopSession({ threadId });
-            }
 
             const registered = yield* registerExternal(client, {
               threadId,
@@ -304,8 +456,29 @@ describe.runIf(process.env[LIVE_PROBE_ENV] === "1")("external MCP live probe", (
               cwd: process.cwd(),
               runtimeMode: "full-access",
             });
-            expect(capturedMcpNames.at(-1)).toEqual([externalName, "t3-code"]);
+            expect(capturedMcpNames.at(-1)).toEqual(["t3-code"]);
             expect(readNames(threadId)).toEqual([externalName, "t3-code"]);
+
+            const gateway = capturedGateways.at(-1);
+            const nativeGateway = capturedNativeMcp.at(-1)?.[0];
+            expect(gateway).toBeDefined();
+            expect(capturedNativeMcp.at(-1)?.length).toBe(1);
+            expect(nativeGateway?.name).toBe("t3-code");
+            const nativeGatewayIsHttp = nativeGateway !== undefined && "url" in nativeGateway;
+            expect(nativeGatewayIsHttp).toBe(true);
+            expect(nativeGatewayIsHttp && nativeGateway.url === gateway?.endpoint).toBe(true);
+            expect(
+              nativeGatewayIsHttp &&
+                nativeGateway.headers?.some(
+                  ({ name, value }) =>
+                    name === "Authorization" && value === gateway?.authorizationHeader,
+                ),
+            ).toBe(true);
+
+            const toolNames = yield* listGatewayToolNames(gateway!).pipe(Effect.orDie);
+            expect(toolNames).toContain(EXTERNAL_MCP_LIVE_TOOL_NAME);
+            expect(toolNames).toContain("preview_status");
+            yield* Effect.logInfo("Cursor gateway live probe surface", { toolNames });
 
             const internal = McpProviderSession.readMcpProviderSession(threadId);
             expect(internal).toBeDefined();
@@ -330,11 +503,193 @@ describe.runIf(process.env[LIVE_PROBE_ENV] === "1")("external MCP live probe", (
             expect(capturedMcpNames.at(-1)).toEqual(["t3-code"]);
             expect(readNames(threadId)).toEqual(["t3-code"]);
             yield* provider.stopSession({ threadId });
+          }),
+        ).pipe(
+          Effect.ensuring(Effect.sync(() => McpProviderSession.clearAllMcpProviderSessions())),
+          Effect.provide(Layer.mergeAll(authLayer, NodeHttpServer.layerTest, NodeServices.layer)),
+        ),
+      12 * 60_000,
+    );
+
+    it.effect(
+      "records bounded additive live results for every other supported harness",
+      () =>
+        Effect.gen(function* () {
+          const harnesses = [
+            "codex",
+            "grok",
+            "claudeAgent",
+            "opencode",
+          ] satisfies Array<ExternalMcpLiveHarness>;
+
+          for (const harness of harnesses) {
+            let handle: ExternalMcpLiveWorkerProcessHandle | undefined;
+            let discardedOutput:
+              | { readonly stdoutBytes: number; readonly stderrBytes: number }
+              | undefined;
+            const result = yield* Effect.promise(() =>
+              runExternalMcpLiveWorker({
+                harness,
+                command: {
+                  executable: NodePath.resolve(process.cwd(), "node_modules/.bin/vp"),
+                  args: [
+                    "test",
+                    "run",
+                    "apps/server/src/mcp/ExternalMcpLiveProbe.test.ts",
+                    "-t",
+                    "runs one best-effort external MCP live worker",
+                  ],
+                  cwd: process.cwd(),
+                  environment: {
+                    [EXTERNAL_MCP_LIVE_PROBE_ENV]: "1",
+                  },
+                },
+                deadlineMs: 120_000,
+                gracefulTerminationMs: 10_000,
+                forcedTerminationMs: 10_000,
+                onSpawn: (spawned) => {
+                  handle = spawned;
+                },
+                onDiscardedOutput: (summary) => {
+                  discardedOutput = summary;
+                },
+              }),
+            );
+
+            expect(handle).toBeDefined();
+            if (handle === undefined)
+              throw new Error("Live worker did not expose its owned handle.");
+            expect(processGroupIsAlive(handle)).toBe(false);
+            expect(discardedOutput).toBeDefined();
+            // @effect-diagnostics-next-line preferSchemaOverJson:off -- the reviewed protocol contains enums only.
+            const encoded = JSON.stringify(result);
+            yield* Effect.sync(() => {
+              process.stderr.write(`external MCP live probe result: ${encoded}\n`);
+            });
           }
         }),
-      ).pipe(
-        Effect.ensuring(Effect.sync(() => McpProviderSession.clearAllMcpProviderSessions())),
-        Effect.provide(Layer.mergeAll(authLayer, NodeHttpServer.layerTest, NodeServices.layer)),
-      ),
-  );
-});
+      12 * 60_000,
+    );
+  },
+);
+
+describe.runIf(process.env[EXTERNAL_MCP_LIVE_PROBE_ENV] === "1" && isBestEffortWorker)(
+  "external MCP live probe worker",
+  () => {
+    it.effect(
+      "runs one best-effort external MCP live worker",
+      () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const { harness } = readExternalMcpLiveWorkerContext();
+            let stage: ExternalMcpLiveWorkerStage = "setup";
+            const serverServices = yield* Layer.merge(serve, registryLayer).pipe(Layer.build);
+            Context.get(serverServices, McpSessionRegistry.McpSessionRegistry);
+            const client = yield* HttpClient.HttpClient;
+            const cryptoService = yield* Crypto.Crypto;
+
+            const exit = yield* Effect.exit(
+              Effect.gen(function* () {
+                McpProviderSession.clearAllMcpProviderSessions();
+                const threadId = ThreadId.make(`generic-${harness}-live-probe`);
+                const nonce = yield* cryptoService.randomUUIDv4;
+                const fixtureAuthorization = `Bearer ${yield* cryptoService.randomUUIDv4}`;
+
+                stage = "adapter";
+                const nativeMcpNames: Array<ReadonlyArray<string>> = [];
+                const adapter = yield* makeBestEffortAdapter(harness, nativeMcpNames);
+                const providerServices = yield* makeProviderLayer(adapter).pipe(Layer.build);
+                const provider = Context.get(providerServices, ProviderService.ProviderService);
+                const providerInstanceId = defaultInstanceIdForDriver(adapter.provider);
+
+                const fixture = yield* Effect.acquireRelease(
+                  Effect.promise(() =>
+                    startExternalMcpLiveFixture({
+                      authorizationHeader: fixtureAuthorization,
+                      nonce,
+                    }),
+                  ),
+                  (running) => Effect.promise(() => running.stop()).pipe(Effect.ignore),
+                );
+
+                stage = "registration";
+                const registered = yield* registerExternal(client, {
+                  threadId,
+                  endpoint: fixture.endpoint,
+                  authorizationHeader: fixtureAuthorization,
+                });
+                expect(registered.status).toBe(204);
+
+                stage = "session-start";
+                yield* provider
+                  .startSession(threadId, {
+                    threadId,
+                    provider: adapter.provider,
+                    providerInstanceId,
+                    cwd: process.cwd(),
+                    runtimeMode: "full-access",
+                  })
+                  .pipe(Effect.timeout("1 minute"));
+                expect(readNames(threadId)).toEqual([externalName, "t3-code"]);
+                expect(nativeMcpNames.at(-1)).toEqual([externalName, "t3-code"]);
+
+                stage = "internal-mcp";
+                const internal = McpProviderSession.readMcpProviderSession(threadId);
+                expect(internal).toBeDefined();
+                yield* assertInternalEndpointAcceptsCredential(client, internal!);
+
+                stage = "turn";
+                const terminal = yield* Deferred.make<void>();
+                const eventFiber = yield* Stream.runForEach(provider.streamEvents, (event) =>
+                  event.threadId === threadId && event.type === "turn.completed"
+                    ? Deferred.succeed(terminal, undefined).pipe(Effect.asVoid)
+                    : Effect.void,
+                ).pipe(Effect.forkChild);
+                yield* Effect.gen(function* () {
+                  yield* provider.sendTurn({
+                    threadId,
+                    input: `Call ${EXTERNAL_MCP_LIVE_TOOL_NAME} exactly once with the nonce ${nonce}. After the tool returns, reply with only done.`,
+                    attachments: [],
+                  });
+                  yield* Deferred.await(terminal);
+                }).pipe(Effect.timeout("90 seconds"));
+                yield* Fiber.interrupt(eventFiber);
+
+                stage = "fixture-call";
+                expect(fixture.calls).toEqual([{ nonce }]);
+
+                stage = "cleanup";
+                const cleared = yield* clearExternal(client, threadId);
+                expect(cleared.status).toBe(204);
+                yield* provider.stopSession({ threadId }).pipe(Effect.timeout("20 seconds"));
+                stage = "complete";
+              }),
+            );
+
+            yield* Effect.sync(() =>
+              publishExternalMcpLiveWorkerResult(
+                Exit.isSuccess(exit)
+                  ? {
+                      status: "passed",
+                      reachedStage: "complete",
+                      reason: "all-assertions-passed",
+                    }
+                  : {
+                      status: "failed",
+                      reachedStage: stage,
+                      reason:
+                        failureTag(exit) === "TimeoutException"
+                          ? "stage-timed-out"
+                          : "stage-failed",
+                    },
+              ),
+            );
+          }),
+        ).pipe(
+          Effect.ensuring(Effect.sync(() => McpProviderSession.clearAllMcpProviderSessions())),
+          Effect.provide(Layer.mergeAll(authLayer, NodeHttpServer.layerTest, NodeServices.layer)),
+        ),
+      4 * 60_000,
+    );
+  },
+);
