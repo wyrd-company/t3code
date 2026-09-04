@@ -62,10 +62,27 @@ describe("external MCP live fixture", () => {
     const listPayload = (await listed.json()) as { result: { tools: Array<{ name: string }> } };
     expect(listPayload.result.tools.map(({ name }) => name)).toEqual([EXTERNAL_MCP_LIVE_TOOL_NAME]);
 
+    const wrongTool = await rpc(
+      "tools/call",
+      { name: "generic_wrong_tool", arguments: { nonce } },
+      3,
+    );
+    const wrongToolPayload = (await wrongTool.json()) as { error: { code: number } };
+    expect(wrongToolPayload.error.code).toBe(-32602);
+
+    const wrongNonce = await rpc(
+      "tools/call",
+      { name: EXTERNAL_MCP_LIVE_TOOL_NAME, arguments: { nonce: "generic-wrong-nonce" } },
+      4,
+    );
+    const wrongNoncePayload = (await wrongNonce.json()) as { error: { code: number } };
+    expect(wrongNoncePayload.error.code).toBe(-32602);
+    expect(fixture.calls).toEqual([]);
+
     const called = await rpc(
       "tools/call",
       { name: EXTERNAL_MCP_LIVE_TOOL_NAME, arguments: { nonce } },
-      3,
+      5,
     );
     const callPayload = (await called.json()) as { result: { structuredContent: unknown } };
     expect(callPayload.result.structuredContent).toEqual({ nonce });
