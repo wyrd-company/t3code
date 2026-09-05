@@ -461,3 +461,19 @@ describe.skipIf(!userNamespacesAvailable)("external MCP live worker boundary", (
     }
   });
 });
+
+describe.skipIf(!userNamespacesAvailable)("external MCP live worker diagnostics", () => {
+  it("keeps what the harness said when it fails, without its credentials", async () => {
+    // Discarding all output was the first shape. It cost the diagnosis of two
+    // real failures — the second a kernel refusing the namespace the worker is
+    // built from — while protecting a credential this worker can redact by
+    // name, because it is the thing that injected it.
+    const sentinel = `sentinel-${NodeCrypto.randomUUID()}`;
+    const result = await runFixture("secret-output-then-vanish", { secret: sentinel });
+
+    expect(result.status).toBe("failed");
+    expect(JSON.stringify(result)).not.toContain(sentinel);
+    expect(result).toMatchObject({ diagnostic: expect.stringContaining("unable to start") });
+    expect(result).toMatchObject({ diagnostic: expect.stringContaining("[redacted]") });
+  });
+});
