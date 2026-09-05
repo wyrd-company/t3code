@@ -7,9 +7,7 @@
 #     - .github/fork/capture-public-config-overrides.mjs
 #     - .github/fork/public-config.mjs
 #     - .github/fork/resolve-public-config.mjs
-#     - .github/fork/read-upstream-version.sh
 #     - .github/fork/verify-base-version.sh
-#     - .github/fork/verify-upstream-base-pin.sh
 #     - .github/fork/assert-build-config.sh
 #     - .github/fork/build-node-pty.sh
 #     - .github/fork/pack-server.mjs
@@ -44,10 +42,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
-upstream_version="$("${repo_root}/.github/fork/read-upstream-version.sh" "${repo_root}/.github/fork/upstream-version")"
-"${repo_root}/.github/fork/verify-base-version.sh" "$version" "$upstream_version"
-"${repo_root}/.github/fork/verify-upstream-base-pin.sh" \
-  "$upstream_version" "${repo_root}/.github/fork/base-tag"
+# The upstream release this build is based on, taken from the release version
+# itself: a tag of server/0.0.38-wyrd.1 is by construction a build of upstream
+# 0.0.38. It was previously read from a file that had to be kept in step with
+# every rebase, which is a second copy of a fact the tag already carries.
+#
+# That the branch really sits on that upstream release is asserted by the
+# rebase workflow, where upstream's tags are reachable, before this tag exists.
+upstream_version="${version%%-wyrd.*}"
+if [[ "$upstream_version" == "$version" ]]; then
+  echo "Release version ${version} does not carry a -wyrd counter." >&2
+  exit 1
+fi
 
 node "${repo_root}/.github/fork/capture-public-config-overrides.mjs" "$operator_overrides"
 node "${repo_root}/.github/fork/public-config.mjs" package "$upstream_version" \

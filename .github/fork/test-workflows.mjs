@@ -57,17 +57,17 @@ for (const [name, command] of [
 ]) {
   NodeAssert.equal(findStep(ciSteps, name).run, command);
 }
-NodeAssert.equal(findStep(ciSteps, "Check fork boundary").run, ".github/fork/check-allowlist.sh");
-NodeAssert.match(findStep(ciSteps, "Verify upstream base pin").run, /verify-upstream-base-pin\.sh/);
-NodeAssert.match(findStep(ciSteps, "Verify upstream base pin").run, /read-upstream-version\.sh/);
-NodeAssert.match(
-  findStep(ciSteps, "Verify upstream base pin").run,
-  /\.github\/fork\/upstream-version/,
-);
-NodeAssert.equal(
-  findStep(ciSteps, "Verify upstream base pin").env.GITHUB_TOKEN,
-  "${{ github.token }}",
-);
+// The fork boundary is judged by a reviewer running fork-surface.sh, not by
+// CI. Which upstream files the fork modifies is a claim about the cost of the
+// next rebase; CI answers whether the fork works, and a static list fails
+// exactly when upstream restructures and the list is stale by construction.
+for (const absent of ["Check fork boundary", "Verify upstream base pin"]) {
+  NodeAssert.equal(
+    ciSteps.some((step) => step.name === absent),
+    false,
+    `${absent} belongs to review, not CI`,
+  );
+}
 NodeAssert.equal(findStep(ciSteps, "Test fork tooling").run, ".github/fork/test.sh");
 
 const release = readWorkflow("fork-release.yml");
@@ -102,8 +102,9 @@ const releaseSteps = stepsFor(release, "release");
 NodeAssert.equal(findStep(releaseSteps, "Checkout").with["fetch-depth"], 0);
 NodeAssert.match(findStep(releaseSteps, "Resolve release version").run, /release-version\.mjs/);
 NodeAssert.equal(
-  findStep(releaseSteps, "Check fork boundary").run,
-  ".github/fork/check-allowlist.sh",
+  releaseSteps.some((step) => step.name === "Check fork boundary"),
+  false,
+  "the fork boundary belongs to review, not the release build",
 );
 NodeAssert.match(findStep(releaseSteps, "Build release tarball").run, /build-release\.sh/);
 NodeAssert.equal(
