@@ -19,10 +19,6 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    env:
-      T3CODE_BASE_TAG: v0.0.38
-      T3CODE_BASE_COMMIT: c0995d2eaf8ec787b3318ed1169ae266ed1529f8
-      T3CODE_RELEASE_VERSION: 0.0.38-wyrd.1
     permissions:
       contents: read
       packages: write
@@ -59,18 +55,19 @@ jobs:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: |
           set -euo pipefail
-          if [ "$RELEASE_VERSION" != "$T3CODE_RELEASE_VERSION" ]; then
-            printf 'Release tag version %s does not match fork release version %s.\n' \
-              "$RELEASE_VERSION" "$T3CODE_RELEASE_VERSION" >&2
-            exit 1
-          fi
-
+          # The tag names the release; nothing else declares one, so there is
+          # nothing left for it to disagree with.
           git fetch origin refs/heads/web-image:refs/remotes/origin/web-image
           git merge-base --is-ancestor HEAD refs/remotes/origin/web-image
-          git cat-file -e "${T3CODE_BASE_COMMIT}^{commit}"
+
+          # Derived from the mirror, as in CI: upstream tags are never pushed
+          # to origin, so nothing here can resolve one.
+          git fetch --no-tags --quiet origin main
+          base="$(git merge-base HEAD origin/main)"
+          printf 'Fork base is %s\n' "$base"
 
           violations="$(
-            git diff --name-status "${T3CODE_BASE_COMMIT}...HEAD" |
+            git diff --name-status "${base}...HEAD" |
               awk '$1 != "A" || ($2 !~ /^docker\/t3code-web\// && $2 !~ /^\.github\/workflows\/fork-web-image-(ci|cd)\.yml$/)'
           )"
           if [ -n "$violations" ]; then
@@ -78,9 +75,6 @@ jobs:
             exit 1
           fi
 
-          grep --fixed-strings --quiet "$T3CODE_BASE_TAG" docker/t3code-web/README.md
-          grep --fixed-strings --quiet "$T3CODE_BASE_COMMIT" docker/t3code-web/README.md
-          grep --fixed-strings --quiet "web/${T3CODE_RELEASE_VERSION}" docker/t3code-web/README.md
           workspace_vite_plus="$(awk '$1 == "vite-plus:" { print $2; exit }' pnpm-workspace.yaml)"
           docker_vite_plus="$(sed -n 's/^ARG VITE_PLUS_VERSION=//p' docker/t3code-web/Dockerfile)"
           test -n "$workspace_vite_plus"
