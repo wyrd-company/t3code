@@ -1,9 +1,0 @@
-# ---
-# relationships:
-#   used_by:
-#     - .github/fork/build-release.sh
-#     - .github/fork/read-upstream-version.sh
-#     - .github/fork/test.sh
-#     - FORK.md
-# ---
-0.0.37

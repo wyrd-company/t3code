@@ -2,9 +2,7 @@
 # relationships:
 #   verifies: mcp-external-registration
 #   uses:
-#     - .github/fork/check-allowlist.sh
 #     - .github/fork/test.sh
-#     - .github/fork/verify-upstream-base-pin.sh
 # ---
 name: Fork server CI
 
@@ -33,16 +31,6 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-
-      - name: Check fork boundary
-        run: .github/fork/check-allowlist.sh
-
-      - name: Verify upstream base pin
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          version="$(.github/fork/read-upstream-version.sh .github/fork/upstream-version)"
-          .github/fork/verify-upstream-base-pin.sh "$version" .github/fork/base-tag
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
