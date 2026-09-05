@@ -10,6 +10,8 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
+import * as NodeChildProcess from "node:child_process";
+
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
@@ -21,6 +23,7 @@ import {
   type ExternalMcpLiveWorkerDiscardedOutput,
   type ExternalMcpLiveWorkerProcessHandle,
 } from "./ExternalMcpLiveWorker.ts";
+import { EXTERNAL_MCP_LIVE_WORKER_UNSHARE } from "./ExternalMcpLiveWorkerSupervisor.ts";
 import {
   EXTERNAL_MCP_LIVE_WORKER_HARNESS_ENV,
   EXTERNAL_MCP_LIVE_WORKER_PROTOCOL_ENV,
@@ -117,7 +120,31 @@ const runFixture = async (mode: string, options: FixtureRunOptions = {}) => {
   }
 };
 
-describe("external MCP live worker boundary", () => {
+/**
+ * Whether this kernel lets an unprivileged process create the namespaces the
+ * worker boundary is built from.
+ *
+ * The boundary contains a harness by running it in its own user and PID
+ * namespace, so where the kernel forbids that, there is no boundary to test.
+ * Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor, which
+ * is what GitHub's ubuntu-latest runners are, and the worker deliberately
+ * discards child output for secret safety — so the failure arrives as a bare
+ * "spawn-failed" with nothing to read.
+ *
+ * Probing the capability rather than the runner keeps this honest: it asks
+ * exactly what the worker asks, so a worker that breaks for any other reason
+ * still fails these tests rather than skipping them.
+ */
+const userNamespacesAvailable = ((): boolean => {
+  const probe = NodeChildProcess.spawnSync(
+    EXTERNAL_MCP_LIVE_WORKER_UNSHARE,
+    ["--user", "--map-current-user", "--pid", "--fork", "--", "/bin/true"],
+    { stdio: "ignore" },
+  );
+  return probe.error === undefined && probe.status === 0;
+})();
+
+describe.skipIf(!userNamespacesAvailable)("external MCP live worker boundary", () => {
   it("returns before its outer watchdog and reaps a worker whose finalizer never settles", async () => {
     let handle: ExternalMcpLiveWorkerProcessHandle | undefined;
     const result = await runFixture("stuck-finalizer", {
