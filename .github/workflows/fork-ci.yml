@@ -51,6 +51,13 @@ jobs:
       - name: Typecheck
         run: vpr typecheck
 
+      # The live worker boundary runs a harness in its own user and PID
+      # namespace. Ubuntu 24.04 forbids unprivileged user namespaces through
+      # AppArmor, so without this the boundary cannot be exercised here and
+      # its tests skip themselves rather than fail on the environment.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Test server
         run: vp run --filter t3 test
 
