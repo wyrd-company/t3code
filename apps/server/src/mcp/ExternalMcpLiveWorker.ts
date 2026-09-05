@@ -83,10 +83,13 @@ const RETAINED_STDERR_BYTES = 4096;
  * this is a floor rather than a guarantee — which is the right trade for
  * output that only ever reaches the developer who started the run.
  */
-const redactKnownSecrets = (text: string, environment: Record<string, string>): string => {
+const redactKnownSecrets = (
+  text: string,
+  environment: Readonly<Record<string, string | undefined>>,
+): string => {
   let redacted = text;
   for (const value of Object.values(environment)) {
-    if (value.length >= 8) {
+    if (value !== undefined && value.length >= 8) {
       redacted = redacted.split(value).join("[redacted]");
     }
   }
