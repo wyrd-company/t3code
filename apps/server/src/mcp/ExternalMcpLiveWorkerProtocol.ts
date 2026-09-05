@@ -97,6 +97,9 @@ export const ExternalMcpLiveWorkerResult = Schema.Union([
     reachedStage: ExternalMcpLiveWorkerStage,
     reason: ExternalMcpLiveWorkerParentReason,
     teardown: ExternalMcpLiveWorkerTeardown,
+    // What the harness said as it failed, bounded and with the credentials
+    // this worker injected redacted. Absent when it said nothing.
+    diagnostic: Schema.optionalKey(Schema.String),
   }),
 ]);
 export type ExternalMcpLiveWorkerResult = typeof ExternalMcpLiveWorkerResult.Type;

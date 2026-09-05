@@ -131,6 +131,13 @@ switch (mode) {
     });
     stayAlive();
     break;
+  case "secret-output-then-vanish": {
+    // Prints a credential and then leaves no result, so the parent reports a
+    // failure and has stderr to attach to it.
+    const secret = process.env.T3_EXTERNAL_MCP_WORKER_FIXTURE_SECRET;
+    process.stderr.write(`unable to start: ${secret}\n`);
+    break;
+  }
   case "secret-output": {
     const secret = process.env.T3_EXTERNAL_MCP_WORKER_FIXTURE_SECRET;
     process.stdout.write(`${secret}\n`);
