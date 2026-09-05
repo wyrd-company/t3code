@@ -25,10 +25,6 @@ jobs:
     name: Build and smoke test
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      T3CODE_BASE_TAG: v0.0.38
-      T3CODE_BASE_COMMIT: c0995d2eaf8ec787b3318ed1169ae266ed1529f8
-      T3CODE_RELEASE_VERSION: 0.0.38-wyrd.1
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -38,10 +34,21 @@ jobs:
       - name: Verify additive fork boundary
         run: |
           set -euo pipefail
-          git cat-file -e "${T3CODE_BASE_COMMIT}^{commit}"
+
+          # The base is where this branch and the mirror last agreed. Git knows
+          # it; a commit written into this file would be a second copy that has
+          # to be moved by hand on every rebase, and a copy that falls out of
+          # step makes this check measure against the wrong release and report
+          # upstream's own changes as ours.
+          #
+          # The mirror, not the upstream tag: upstream tags are never pushed to
+          # origin, so nothing here can resolve one.
+          git fetch --no-tags --quiet origin main
+          base="$(git merge-base HEAD origin/main)"
+          printf 'Fork base is %s\n' "$base"
 
           violations="$(
-            git diff --name-status "${T3CODE_BASE_COMMIT}...HEAD" |
+            git diff --name-status "${base}...HEAD" |
               awk '$1 != "A" || ($2 !~ /^docker\/t3code-web\// && $2 !~ /^\.github\/workflows\/fork-web-image-(ci|cd)\.yml$/)'
           )"
           if [ -n "$violations" ]; then
@@ -49,9 +56,6 @@ jobs:
             exit 1
           fi
 
-          grep --fixed-strings --quiet "$T3CODE_BASE_TAG" docker/t3code-web/README.md
-          grep --fixed-strings --quiet "$T3CODE_BASE_COMMIT" docker/t3code-web/README.md
-          grep --fixed-strings --quiet "web/${T3CODE_RELEASE_VERSION}" docker/t3code-web/README.md
           workspace_vite_plus="$(awk '$1 == "vite-plus:" { print $2; exit }' pnpm-workspace.yaml)"
           docker_vite_plus="$(sed -n 's/^ARG VITE_PLUS_VERSION=//p' docker/t3code-web/Dockerfile)"
           test -n "$workspace_vite_plus"
@@ -98,8 +102,6 @@ jobs:
               match = re.search(rf"(?m)^      {name}: (?P<value>\S+)\s*$", workflow)
               return match.group("value") if match else None
 
-          expected_base_tag = "v0.0.38"
-          expected_base_commit = "c0995d2eaf8ec787b3318ed1169ae266ed1529f8"
           verification_steps = {
               "ci": step(ci_workflow, "Verify additive fork boundary"),
               "cd": step(cd_workflow, "Verify release source"),
@@ -109,9 +111,12 @@ jobs:
               ("cd", cd_workflow),
           ):
               body = verification_steps[workflow_name]
+              # Upstream tags are never pushed to origin, so neither workflow
+              # can resolve one. This stays asserted: reaching for a tag would
+              # fail only on the fork, and only at release time.
               tag_resolution_patterns = (
-                  r"(?m)^.*\bgit\s+[^\n]*(?:T3CODE_BASE_TAG|refs/tags/)",
-                  r"(?m)^.*\bgit\s+fetch\b[^\n]*--tags",
+                  r"(?m)^.*\bgit\s+[^\n]*refs/tags/",
+                  r"(?m)^.*\bgit\s+fetch\b[^\n]*(?<!--no)--tags",
               )
               check(
                   f"test_{workflow_name}_base_verification_avoids_tag_resolution",
@@ -121,28 +126,34 @@ jobs:
                   ),
                   f"{workflow_name.upper()} must not resolve or fetch the upstream base tag",
               )
+              # Derived from the mirror, never recorded. A written-down base is
+              # a second copy of a commit git already knows, and one that falls
+              # out of step reports upstream's own changes as ours.
               check(
-                  f"test_{workflow_name}_additive_diff_uses_pinned_commit",
+                  f"test_{workflow_name}_additive_diff_derives_the_base",
                   body is not None
-                  and 'git cat-file -e "${T3CODE_BASE_COMMIT}^{commit}"' in body
-                  and 'git diff --name-status "${T3CODE_BASE_COMMIT}...HEAD"' in body,
-                  f"{workflow_name.upper()} must verify and diff from the pinned base commit",
+                  and 'git merge-base HEAD origin/main' in body
+                  and 'git diff --name-status "${base}...HEAD"' in body,
+                  f"{workflow_name.upper()} must diff from the base it derives from the mirror",
               )
               check(
-                  f"test_{workflow_name}_upstream_base_pin",
-                  workflow_env(workflow, "T3CODE_BASE_TAG") == expected_base_tag
-                  and workflow_env(workflow, "T3CODE_BASE_COMMIT")
-                  == expected_base_commit,
-                  f"{workflow_name.upper()} must retain the accepted upstream tag and commit identity",
+                  f"test_{workflow_name}_records_no_base",
+                  workflow_env(workflow, "T3CODE_BASE_TAG") is None
+                  and workflow_env(workflow, "T3CODE_BASE_COMMIT") is None,
+                  f"{workflow_name.upper()} must not record a base it can derive",
               )
 
           check(
-              "test_readme_upstream_base_tag_and_commit_agree",
-              expected_base_tag in readme
-              and expected_base_commit in readme
-              and "does not mirror upstream `v*` tags" in readme
-              and "verification uses the pinned base commit" in readme,
-              "README must document the tag identity, commit pin, and origin-only topology",
+              "test_readme_documents_a_derived_base",
+              "does not\nmirror upstream `v*` tags" in readme.replace("\r", "")
+              or "does not mirror upstream `v*` tags" in readme,
+              "README must document the origin-only tag topology",
+          )
+          check(
+              "test_readme_pins_no_version",
+              not re.search(r"\b\d+\.\d+\.\d+-wyrd\.\d+\b", readme)
+              and not re.search(r"\b[0-9a-f]{40}\b", readme),
+              "README must not name a release version or base commit it cannot keep true",
           )
 
           forbidden_visibility_patterns = (
@@ -191,39 +202,29 @@ jobs:
                   "publish permissions must be limited to checkout, push, and attestation",
               )
 
-              def publish_env(name):
-                  match = re.search(rf"(?m)^      {name}: (?P<value>\S+)\s*$", publish)
-                  return match.group("value") if match else None
-
-              base_tag = publish_env("T3CODE_BASE_TAG")
-              base_commit = publish_env("T3CODE_BASE_COMMIT")
-              release_version = publish_env("T3CODE_RELEASE_VERSION")
+              # The release identity comes from the tag that triggered the
+              # run, so the image cannot be labelled with a version the branch
+              # merely claimed. Nothing records it, so nothing can disagree.
               check(
-                  "test_release_identity_is_distinct_from_upstream_base",
-                  base_tag is not None
-                  and base_tag.startswith("v")
-                  and release_version is not None
-                  and release_version != base_tag.removeprefix("v"),
-                  "fork release version must differ from the upstream base tag",
-              )
-              identity_guards = (
-                  '"$RELEASE_VERSION" != "$T3CODE_RELEASE_VERSION"',
-                  'git cat-file -e "${T3CODE_BASE_COMMIT}^{commit}"',
-                  'git diff --name-status "${T3CODE_BASE_COMMIT}...HEAD"',
-                  'grep --fixed-strings --quiet "$T3CODE_BASE_TAG"',
-                  'grep --fixed-strings --quiet "$T3CODE_BASE_COMMIT"',
-                  'grep --fixed-strings --quiet "web/${T3CODE_RELEASE_VERSION}"',
+                  "test_release_identity_comes_from_the_tag",
+                  "T3CODE_VERSION=${{ steps.release.outputs.version }}" in publish
+                  and "${{ steps.release.outputs.image }}:${{ steps.release.outputs.version }}"
+                  in publish,
+                  "publish must take its version from the release tag",
               )
               check(
-                  "test_release_identity_guards_and_docs_agree",
-                  base_tag is not None
-                  and base_commit is not None
-                  and release_version is not None
-                  and base_tag in readme
-                  and base_commit in readme
-                  and f"web/{release_version}" in readme
-                  and all(guard in publish for guard in identity_guards),
-                  "base and fork release identities must remain guarded and documented",
+                  "test_release_records_no_identity",
+                  not re.search(r"(?m)^      T3CODE_(BASE_TAG|BASE_COMMIT|RELEASE_VERSION):", publish),
+                  "publish must not record a base or release identity it can derive",
+              )
+              # The tag must name a commit the published branch actually
+              # contains: a tag cut on a stray commit would otherwise publish
+              # an image from a tree nobody reviewed.
+              check(
+                  "test_release_requires_the_commit_to_be_on_the_branch",
+                  "git merge-base --is-ancestor HEAD refs/remotes/origin/web-image"
+                  in verification_steps["cd"],
+                  "CD must require the release commit to be on the published branch",
               )
 
           anonymous = job(cd_workflow, "anonymous-arm64-smoke")
