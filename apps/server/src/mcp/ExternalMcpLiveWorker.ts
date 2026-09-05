@@ -64,6 +64,35 @@ export interface ExternalMcpLiveWorkerDiscardedOutput {
   readonly stderrBytes: number;
 }
 
+/**
+ * How much of the harness's stderr to keep for diagnosis.
+ *
+ * Keeping none was the first shape, and it cost more than it saved: a harness
+ * that could not start reported a bare "spawn-failed" with nothing to read,
+ * twice, and the second time the cause was a kernel refusing the namespace
+ * the worker is built from. A tail is enough for an errno or a missing
+ * binary, and bounded so a chatty harness cannot fill memory.
+ */
+const RETAINED_STDERR_BYTES = 4096;
+
+/**
+ * Redacts the credentials this worker put into the harness's environment.
+ *
+ * These are the only secrets it knows: the per-thread MCP bearer tokens it
+ * was handed. A credential the harness mints for itself is not covered, so
+ * this is a floor rather than a guarantee — which is the right trade for
+ * output that only ever reaches the developer who started the run.
+ */
+const redactKnownSecrets = (text: string, environment: Record<string, string>): string => {
+  let redacted = text;
+  for (const value of Object.values(environment)) {
+    if (value.length >= 8) {
+      redacted = redacted.split(value).join("[redacted]");
+    }
+  }
+  return redacted;
+};
+
 interface TerminationOutcome {
   readonly teardown: "exited-without-signal" | "terminated-gracefully" | "terminated-forcibly";
 }
@@ -91,6 +120,7 @@ const failedResult = (
   reason: ExternalMcpLiveWorkerParentReason,
   teardown: ExternalMcpLiveWorkerTeardown,
   reachedStage: ExternalMcpLiveWorkerStage = "setup",
+  diagnostic?: string,
 ): ExternalMcpLiveWorkerResult => ({
   protocol: EXTERNAL_MCP_LIVE_WORKER_PROTOCOL,
   harness,
@@ -98,6 +128,7 @@ const failedResult = (
   reachedStage,
   reason,
   teardown,
+  ...(diagnostic !== undefined && diagnostic !== "" ? { diagnostic } : {}),
 });
 
 const readResultFile = (resultFile: string): string => {
@@ -113,17 +144,20 @@ const resultFromSnapshot = (
   harness: ExternalMcpLiveHarness,
   snapshot: ExternalMcpLiveWorkerResultSnapshot,
   teardown: ExternalMcpLiveWorkerTeardown,
+  // What the harness said, already redacted. A worker that left no result is
+  // the case most in need of it: the reason names what is absent, never why.
+  diagnostic?: string,
 ): ExternalMcpLiveWorkerResult => {
   switch (snapshot.kind) {
     case "missing":
-      return failedResult(harness, "missing-worker-result", teardown);
+      return failedResult(harness, "missing-worker-result", teardown, "setup", diagnostic);
     case "duplicate":
-      return failedResult(harness, "duplicate-worker-result", teardown);
+      return failedResult(harness, "duplicate-worker-result", teardown, "setup", diagnostic);
     case "malformed":
-      return failedResult(harness, "malformed-worker-result", teardown);
+      return failedResult(harness, "malformed-worker-result", teardown, "setup", diagnostic);
     case "valid": {
       if (snapshot.result.harness !== harness) {
-        return failedResult(harness, "wrong-harness-result", teardown);
+        return failedResult(harness, "wrong-harness-result", teardown, "setup", diagnostic);
       }
       if (snapshot.result.status === "passed") {
         return teardown === "exited-without-signal"
@@ -203,18 +237,29 @@ export async function runExternalMcpLiveWorker(
         stdio: ["ignore", "pipe", "pipe", "pipe"],
       },
     );
-  } catch {
+  } catch (error) {
     NodeFS.rmSync(resultDirectory, { recursive: true, force: true });
-    return failedResult(options.harness, "worker-spawn-failed", "spawn-failed");
+    // Nothing has been spawned, so there is no output to read; the throw is
+    // the only account of why. A kernel refusing the namespace and a missing
+    // binary are indistinguishable without it.
+    return failedResult(
+      options.harness,
+      "worker-spawn-failed",
+      "spawn-failed",
+      "setup",
+      error instanceof Error ? error.message : String(error),
+    );
   }
 
   let stdoutBytes = 0;
   let stderrBytes = 0;
+  let stderrTail = "";
   child.stdout!.on("data", (chunk: Buffer | string) => {
     stdoutBytes += Buffer.byteLength(chunk);
   });
   child.stderr!.on("data", (chunk: Buffer | string) => {
     stderrBytes += Buffer.byteLength(chunk);
+    stderrTail = (stderrTail + String(chunk)).slice(-RETAINED_STDERR_BYTES);
   });
 
   const supervisorStatusStream = child.stdio[3] as NodeStream.Readable | null;
@@ -308,7 +353,13 @@ export async function runExternalMcpLiveWorker(
     const snapshot = decodeExternalMcpLiveWorkerResultFile(readResultFile(resultFile));
     const supervisorStatus = await supervisorStatusPromise;
     if (supervisorStatus === undefined || supervisorStatus.kind === "spawn-failed") {
-      return failedResult(options.harness, "worker-spawn-failed", "spawn-failed");
+      return failedResult(
+        options.harness,
+        "worker-spawn-failed",
+        "spawn-failed",
+        "setup",
+        redactKnownSecrets(stderrTail, { ...(options.command.environment ?? {}) }),
+      );
     }
     if (supervisorStatus.signal !== null) {
       return failedResult(options.harness, "worker-exited-by-signal", "exited-by-signal");
@@ -317,7 +368,12 @@ export async function runExternalMcpLiveWorker(
       const reachedStage = snapshot.kind === "valid" ? snapshot.result.reachedStage : "setup";
       return failedResult(options.harness, "worker-exited-nonzero", teardown, reachedStage);
     }
-    return resultFromSnapshot(options.harness, snapshot, teardown);
+    return resultFromSnapshot(
+      options.harness,
+      snapshot,
+      teardown,
+      redactKnownSecrets(stderrTail, { ...(options.command.environment ?? {}) }),
+    );
   } catch {
     if (processTree.hasLiveProcess()) {
       await terminateProcessGroup(
