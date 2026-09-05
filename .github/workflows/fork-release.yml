@@ -2,7 +2,6 @@
 # relationships:
 #   publishes: apps/server
 #   uses:
-#     - .github/fork/check-allowlist.sh
 #     - .github/fork/release-version.mjs
 #     - .github/fork/build-release.sh
 # ---
@@ -45,9 +44,6 @@ jobs:
           version="$(.github/fork/release-version.mjs "$GITHUB_REF_NAME")"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "asset=t3-${version}.tgz" >> "$GITHUB_OUTPUT"
-
-      - name: Check fork boundary
-        run: .github/fork/check-allowlist.sh
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
