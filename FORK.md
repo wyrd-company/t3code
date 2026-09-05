@@ -1,8 +1,8 @@
 ---
 relationships:
   references:
-    - .github/fork/base-tag
-    - .github/fork/upstream-version
+    - .github/fork/resolve-base.sh
+    - .github/fork/fork-surface.sh
     - .github/fork/allowlist.txt
     - LICENSE
 ---
@@ -16,27 +16,44 @@ This repository keeps `main` as a pristine mirror of `pingdotgg/t3code`. Fork ch
 
 Do not merge the fork branches together. Do not merge upstream into either branch.
 
-## Base pin and rebase
+## Base and rebase
 
-The server branch base pin is [.github/fork/base-tag](.github/fork/base-tag), currently commit `cefec32d6fc5d14f03e110ebdde534bdbcc9b62b` from upstream tag `v0.0.37`. The executable pin is a full commit SHA so a checkout from `origin` does not require the upstream tag ref. Moving it is deliberate:
+Each fork branch is our commits replayed onto one upstream release, so the
+point where the branch and `main` last agreed is the release it is built on.
+[.github/fork/resolve-base.sh](.github/fork/resolve-base.sh) reports it:
+
+```bash
+.github/fork/resolve-base.sh
+```
+
+It derives the commit from `origin/main`, the pristine mirror, rather than
+from upstream's tag: upstream `v*.*.*` tags are never pushed to `origin`, so a
+checkout of this repository cannot resolve one. A shallow checkout cannot
+answer at all; fetch with depth 0.
+
+Nothing records the base in a file. A second copy of a commit git already
+knows has to be moved by hand on every rebase, and a copy that falls out of
+step is worse than no copy: the boundary check then measures against the wrong
+release and reports upstream's own changes as ours.
+
+Rebasing onto a new upstream release:
 
 ```bash
 git fetch upstream --tags
-new_base_tag=<new-upstream-tag>
-new_base_commit="$(git rev-parse "refs/tags/${new_base_tag}^{commit}")"
 git switch mcp-external-registration
-git rebase "refs/tags/${new_base_tag}"
-printf '%s\n' "$new_base_commit" > .github/fork/base-tag
-printf '%s\n' "${new_base_tag#v}" > .github/fork/upstream-version
-# Update the base pin sentence above to name the new commit and tag.
-.github/fork/check-allowlist.sh
+git rebase refs/tags/<new-upstream-tag>
+.github/fork/fork-surface.sh
 ```
+
+That the branch sits on a _stable_ release rather than an arbitrary upstream
+commit is asserted by the rebase workflow, where upstream's tags are
+reachable, before anything is pushed.
 
 The `upstream` remote push URL must remain `DISABLED`. Do not push upstream `v*.*.*` tags to `origin`.
 
 ## Server branch boundary
 
-The diff from the base pin can contain any added file. Modifications are limited to:
+The diff from the base can contain any added file. Modifications are limited to:
 
 - `apps/server/src/mcp/**`
 - `apps/server/src/provider/Layers/ClaudeAdapter.ts`
@@ -56,7 +73,7 @@ Server tags use `server/<upstream-version>-wyrd.<release>`, for example `server/
 
 The branch declares `@modelcontextprotocol/sdk` directly in `apps/server/package.json` for Cursor's outbound gateway clients. The build temporarily changes only the package version in the runner worktree so that `t3 --version` reports the fork version, then restores the committed manifest before publication.
 
-The public client configuration is derived from the upstream package version in [.github/fork/upstream-version](.github/fork/upstream-version), which corresponds to the base pin. The release base version must match this record. The release build extracts the relay, Clerk, and relay client OTLP traces values from that exact public npm package and verifies the built bundle matches them. This deliberately reproduces upstream's complete telemetry configuration, including its public traces token.
+The public client configuration is derived from the upstream package version carried by the release tag: `server/0.0.37-wyrd.1` is by construction a build of upstream `0.0.37`. The release build extracts the relay, Clerk, and relay client OTLP traces values from that exact public npm package and verifies the built bundle matches them. This deliberately reproduces upstream's complete telemetry configuration, including its public traces token.
 
 Repository variables named for any of the six public configuration values are optional overrides for deliberate divergence; none are required. Any variable left non-empty shadows derivation. The release logs a warning that names the variable, upstream value, and override value when they differ, then rejects the divergence unless `T3CODE_ALLOW_PUBLIC_CONFIG_DIVERGENCE` is `1`. The built bundle must contain a non-empty value for every field and match the upstream package unless an override is explicitly captured before derivation.
 
