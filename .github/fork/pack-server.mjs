@@ -25,10 +25,8 @@ import { isForkVersion } from "./version.mjs";
 const scriptDirectory = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
 const repoRoot = NodePath.resolve(scriptDirectory, "../..");
 const serverDirectory = NodePath.join(repoRoot, "apps/server");
-const requireFromScripts = NodeModule.createRequire(
-  NodePath.join(repoRoot, "scripts/package.json"),
-);
-const { parse: parseYaml } = requireFromScripts("yaml");
+const requireFromServer = NodeModule.createRequire(NodePath.join(serverDirectory, "package.json"));
+const { parse: parseYaml } = requireFromServer("yaml");
 const [version, outputDirectoryArgument, nodePtyPrebuildArgument] = process.argv.slice(2);
 
 if (!version || !outputDirectoryArgument || !nodePtyPrebuildArgument) {
