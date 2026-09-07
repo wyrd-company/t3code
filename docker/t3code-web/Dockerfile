@@ -13,7 +13,7 @@ ARG NGINX_IMAGE=nginx:1.29-alpine
 FROM ${NODE_IMAGE} AS build
 
 ARG T3CODE_VERSION
-ARG VITE_PLUS_VERSION=0.2.2
+ARG VITE_PLUS_VERSION=0.3.0
 
 RUN test -n "${T3CODE_VERSION}" \
     && apt-get update \
