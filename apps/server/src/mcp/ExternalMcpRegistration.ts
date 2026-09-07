@@ -63,23 +63,22 @@ type RegistrationAuthMiddleware = (
 >;
 
 const makeAuthMiddleware = EnvironmentAuth.EnvironmentAuth.pipe(
-  Effect.map(
-    (serverAuth): RegistrationAuthMiddleware =>
-      Effect.fn("ExternalMcpRegistration.authenticate")(function* (
-        httpEffect: RegistrationHttpEffect,
-      ) {
-        const request = yield* HttpServerRequest.HttpServerRequest;
-        const session = yield* serverAuth.authenticateHttpRequest(request).pipe(
-          Effect.match({
-            onFailure: (error) =>
-              EnvironmentAuth.isServerAuthCredentialError(error) ? unauthorized : internalError,
-            onSuccess: (authenticated) => authenticated,
-          }),
-        );
-        if (HttpServerResponse.isHttpServerResponse(session)) return session;
-        if (!session.scopes.includes(AuthOrchestrationOperateScope)) return forbidden;
-        return yield* httpEffect;
-      }),
+  Effect.map((serverAuth): RegistrationAuthMiddleware =>
+    Effect.fn("ExternalMcpRegistration.authenticate")(function* (
+      httpEffect: RegistrationHttpEffect,
+    ) {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const session = yield* serverAuth.authenticateHttpRequest(request).pipe(
+        Effect.match({
+          onFailure: (error) =>
+            EnvironmentAuth.isServerAuthCredentialError(error) ? unauthorized : internalError,
+          onSuccess: (authenticated) => authenticated,
+        }),
+      );
+      if (HttpServerResponse.isHttpServerResponse(session)) return session;
+      if (!session.scopes.includes(AuthOrchestrationOperateScope)) return forbidden;
+      return yield* httpEffect;
+    }),
   ),
 );
 
