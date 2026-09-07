@@ -14,10 +14,10 @@ import * as NodeURL from "node:url";
 
 const scriptDirectory = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
 const repoRoot = NodePath.resolve(scriptDirectory, "../..");
-const requireFromScripts = NodeModule.createRequire(
-  NodePath.join(repoRoot, "scripts/package.json"),
+const requireFromServer = NodeModule.createRequire(
+  NodePath.join(repoRoot, "apps/server/package.json"),
 );
-const { parse: parseYaml } = requireFromScripts("yaml");
+const { parse: parseYaml } = requireFromServer("yaml");
 
 function readWorkflow(filename) {
   return parseYaml(
