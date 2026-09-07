@@ -309,9 +309,12 @@ jobs:
           PY
 
       - name: Build image
+        # A smoke build is not a release: like the local build example, it
+        # labels itself dev rather than claiming a version the tree does not
+        # contain.
         run: |
           docker build \
-            --build-arg T3CODE_VERSION="$T3CODE_RELEASE_VERSION" \
+            --build-arg T3CODE_VERSION=dev \
             --tag t3code-web-ci:${{ github.sha }} \
             --file docker/t3code-web/Dockerfile \
             .
@@ -319,7 +322,7 @@ jobs:
       - name: Smoke test image
         env:
           IMAGE: t3code-web-ci:${{ github.sha }}
-          T3CODE_VERSION: ${{ env.T3CODE_RELEASE_VERSION }}
+          T3CODE_VERSION: dev
         run: |
           set -euo pipefail
           name="t3code-web-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
