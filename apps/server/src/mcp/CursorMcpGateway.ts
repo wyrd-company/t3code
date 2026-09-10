@@ -292,7 +292,9 @@ export const startCursorMcpGateway = Effect.fn("CursorMcpGateway.start")(functio
       }),
     ),
   );
-  const services = yield* Layer.buildWithScope(application, input.scope).pipe(
+  // HttpRouter.layer is a singleton. Keep this session's mutable router out of
+  // the application memo map and every other provider session.
+  const services = yield* Layer.buildWithScope(Layer.fresh(application), input.scope).pipe(
     Effect.mapError(
       (cause) =>
         new CursorMcpGatewayStartupError({

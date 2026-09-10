@@ -1,3 +1,4 @@
+import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -8,7 +9,8 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
-import { FetchHttpClient, HttpClient, HttpServer } from "effect/unstable/http";
+import { McpProtocol, McpServer } from "effect/unstable/ai";
+import { FetchHttpClient, HttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import { startCursorMcpGateway } from "./CursorMcpGateway.ts";
@@ -136,7 +138,38 @@ const connectGateway = (endpoint: string, authorizationHeader: string) =>
     return client.connect(transport as Parameters<Client["connect"]>[0]).then(() => client);
   });
 
+const connectScopedGateway = (endpoint: string, authorizationHeader: string) =>
+  Effect.acquireRelease(connectGateway(endpoint, authorizationHeader), (client) =>
+    Effect.promise(() => client.close()).pipe(Effect.ignore),
+  );
+
+const startApplicationMcpServer = (scope: Scope.Closeable, memoMap: Layer.MemoMap) =>
+  Effect.gen(function* () {
+    const nodeHttp = yield* Effect.promise(() => import("node:http"));
+    const application = HttpRouter.serve(
+      McpServer.layerHttp({
+        name: "T3 Code application test server",
+        version: "1.0.0",
+        path: "/mcp",
+        protocols: [McpProtocol.v2025_06_18],
+      }),
+      { disableListenLog: true, disableLogger: true },
+    ).pipe(
+      Layer.provideMerge(
+        NodeHttpServer.layer(nodeHttp.createServer, {
+          host: "127.0.0.1",
+          port: 0,
+        }),
+      ),
+    );
+    const services = yield* Layer.buildWithMemoMap(application, memoMap, scope);
+    const address = Context.get(services, HttpServer.HttpServer).address;
+    if (address._tag !== "TcpAddress") return yield* Effect.die("application did not bind TCP");
+    return `http://127.0.0.1:${address.port}/mcp`;
+  });
+
 const withGateway = Effect.fn("CursorMcpGatewayTest.withGateway")(function* (input: {
+  readonly threadId?: ThreadId;
   readonly internalToolName?: string;
   readonly externalToolName?: string;
   readonly internalToolPages?: Parameters<typeof startFixtureServer>[0]["toolPages"];
@@ -145,6 +178,7 @@ const withGateway = Effect.fn("CursorMcpGatewayTest.withGateway")(function* (inp
     typeof startFixtureServer
   >[0]["toolResultContent"];
 }) {
+  const gatewayThreadId = input.threadId ?? threadId;
   const internalFixture = yield* startFixtureServer({
     toolName: input.internalToolName ?? "internal_tool",
     response: "internal",
@@ -175,7 +209,7 @@ const withGateway = Effect.fn("CursorMcpGatewayTest.withGateway")(function* (inp
     registryScope,
   );
   const issued = yield* McpSessionRegistry.issueActiveMcpCredential({
-    threadId,
+    threadId: gatewayThreadId,
     providerInstanceId: ProviderInstanceId.make("cursor"),
   });
   if (!issued) return yield* Effect.die("registry did not issue credential");
@@ -184,13 +218,16 @@ const withGateway = Effect.fn("CursorMcpGatewayTest.withGateway")(function* (inp
     {
       name: "external",
       source: "external",
-      threadId,
+      threadId: gatewayThreadId,
       endpoint: externalFixture.endpoint,
       authorizationHeader: "Bearer external-secret",
       browserToolsAvailable: false,
     },
   ];
   McpProviderSession.setExternalMcpProviderSession(sessions[1]!);
+  yield* Effect.addFinalizer(() =>
+    Effect.sync(() => McpProviderSession.clearExternalMcpProviderSession(gatewayThreadId)),
+  );
   return {
     internalFixture,
     externalFixture,
@@ -200,6 +237,134 @@ const withGateway = Effect.fn("CursorMcpGatewayTest.withGateway")(function* (inp
     registry: Context.get(registryServices, McpSessionRegistry.McpSessionRegistry),
   };
 });
+
+it.effect("starts a Cursor session gateway beside the application MCP server", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const memoMap = yield* Layer.makeMemoMap;
+      yield* Effect.gen(function* () {
+        const applicationScope = yield* Scope.make();
+        yield* Effect.addFinalizer(() => Scope.close(applicationScope, Exit.void));
+        const applicationEndpoint = yield* startApplicationMcpServer(applicationScope, memoMap);
+        const applicationClient = yield* connectScopedGateway(
+          applicationEndpoint,
+          "Bearer application-test",
+        );
+        expect((yield* Effect.promise(() => applicationClient.listTools())).tools).toEqual([]);
+
+        const fixture = yield* withGateway({});
+        const gateway = yield* startCursorMcpGateway({
+          sessions: fixture.sessions,
+          scope: fixture.sessionScope,
+        });
+        expect(gateway.endpoint).not.toBe(applicationEndpoint);
+        const gatewayClient = yield* connectScopedGateway(
+          gateway.endpoint,
+          gateway.authorizationHeader,
+        );
+        expect(
+          (yield* Effect.promise(() => gatewayClient.listTools())).tools.map(({ name }) => name),
+        ).toEqual(["internal_tool", "external_tool"]);
+        expect((yield* Effect.promise(() => applicationClient.listTools())).tools).toEqual([]);
+      }).pipe(Effect.provideService(Layer.CurrentMemoMap, memoMap));
+    }),
+  ),
+);
+
+it.effect("starts two Cursor provider-session gateways concurrently", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const memoMap = yield* Layer.makeMemoMap;
+      yield* Effect.gen(function* () {
+        const applicationScope = yield* Scope.make();
+        yield* Effect.addFinalizer(() => Scope.close(applicationScope, Exit.void));
+        const applicationEndpoint = yield* startApplicationMcpServer(applicationScope, memoMap);
+        const applicationClient = yield* connectScopedGateway(
+          applicationEndpoint,
+          "Bearer application-test",
+        );
+
+        const first = yield* withGateway({
+          threadId: ThreadId.make("thread-gateway-concurrent-one"),
+          internalToolName: "internal_one",
+          externalToolName: "external_one",
+        });
+        const secondThreadId = ThreadId.make("thread-gateway-concurrent-two");
+        const secondExternalFixture = yield* startFixtureServer({
+          toolName: "external_two",
+          response: "external-two",
+        });
+        const secondSessionScope = yield* Scope.make();
+        yield* Effect.addFinalizer(() => Scope.close(secondSessionScope, Exit.void));
+        const secondIssued = yield* first.registry.issue({
+          threadId: secondThreadId,
+          providerInstanceId: ProviderInstanceId.make("cursor"),
+        });
+        const secondSessions: ReadonlyArray<McpProviderSession.McpProviderSessionConfig> = [
+          secondIssued.config,
+          {
+            name: "external",
+            source: "external",
+            threadId: secondThreadId,
+            endpoint: secondExternalFixture.endpoint,
+            authorizationHeader: "Bearer external-secret-two",
+            browserToolsAvailable: false,
+          },
+        ];
+        const [firstGateway, secondGateway] = yield* Effect.all(
+          [
+            startCursorMcpGateway({ sessions: first.sessions, scope: first.sessionScope }),
+            startCursorMcpGateway({
+              sessions: secondSessions,
+              scope: secondSessionScope,
+            }),
+          ],
+          { concurrency: "unbounded" },
+        );
+
+        expect(
+          new Set([applicationEndpoint, firstGateway.endpoint, secondGateway.endpoint]).size,
+        ).toBe(3);
+        const [firstClient, secondClient] = yield* Effect.all(
+          [
+            connectScopedGateway(firstGateway.endpoint, firstGateway.authorizationHeader),
+            connectScopedGateway(secondGateway.endpoint, secondGateway.authorizationHeader),
+          ],
+          { concurrency: "unbounded" },
+        );
+        const [firstTools, secondTools] = yield* Effect.all(
+          [
+            Effect.promise(() => firstClient.listTools()),
+            Effect.promise(() => secondClient.listTools()),
+          ],
+          { concurrency: "unbounded" },
+        );
+        expect(firstTools.tools.map(({ name }) => name)).toEqual(["internal_one", "external_one"]);
+        expect(secondTools.tools.map(({ name }) => name)).toEqual(["internal_one", "external_two"]);
+        expect(
+          Exit.isFailure(
+            yield* connectGateway(firstGateway.endpoint, secondGateway.authorizationHeader).pipe(
+              Effect.exit,
+            ),
+          ),
+        ).toBe(true);
+
+        yield* first.registry.revokeProviderSession(first.issued.config.providerSessionId);
+        expect(
+          Exit.isFailure(
+            yield* connectGateway(firstGateway.endpoint, firstGateway.authorizationHeader).pipe(
+              Effect.exit,
+            ),
+          ),
+        ).toBe(true);
+        expect(
+          (yield* Effect.promise(() => secondClient.listTools())).tools.map(({ name }) => name),
+        ).toEqual(["internal_one", "external_two"]);
+        expect((yield* Effect.promise(() => applicationClient.listTools())).tools).toEqual([]);
+      }).pipe(Effect.provideService(Layer.CurrentMemoMap, memoMap));
+    }),
+  ),
+);
 
 it.effect("routes raw tool names and contains downstream credentials", () =>
   Effect.scoped(
