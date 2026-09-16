@@ -30,6 +30,7 @@ for (const requiredEntry of [
   "package/dist/resource-monitor/linux-x64/t3-resource-monitor",
   "package/dist/claude-history-worker.mjs",
   "package/node_modules/node-pty/prebuilds/linux-x64/pty.node",
+  "package/node_modules/@ff-labs/fff-node/package.json",
   "package/package.json",
 ]) {
   NodeAssert.ok(entries.has(requiredEntry), `Release tarball is missing ${requiredEntry}.`);
@@ -44,7 +45,45 @@ NodeAssert.equal(manifestResult.status, 0, manifestResult.stderr);
 const manifest = JSON.parse(manifestResult.stdout);
 NodeAssert.equal(manifest.name, "t3");
 NodeAssert.equal(manifest.version, version);
-NodeAssert.deepEqual(manifest.bundledDependencies, ["node-pty"]);
+// node-pty for its Debian prebuild; fff and its closure because upstream
+// patches fff-node and npm installs nothing below a bundled package.
+for (const name of [
+  "node-pty",
+  "@ff-labs/fff-node",
+  "@ff-labs/fff-bin-linux-x64-gnu",
+  "ffi-rs",
+  "@yuuang/ffi-rs-linux-x64-gnu",
+]) {
+  NodeAssert.ok(
+    manifest.bundledDependencies.includes(name),
+    `Release manifest does not bundle ${name}.`,
+  );
+}
+for (const name of manifest.bundledDependencies) {
+  NodeAssert.ok(
+    entries.has(`package/node_modules/${name}/package.json`),
+    `Release tarball bundles ${name} in name only.`,
+  );
+  NodeAssert.equal(
+    typeof manifest.dependencies[name],
+    "string",
+    `Bundled ${name} is not declared as a dependency.`,
+  );
+}
+
+// The bundle requires this package through createRequire, which only the
+// patched copy exports; the registry copy fails at startup.
+const fffNodeResult = NodeChildProcess.spawnSync(
+  "tar",
+  ["-xOf", tarball, "package/node_modules/@ff-labs/fff-node/package.json"],
+  { encoding: "utf8" },
+);
+NodeAssert.equal(fffNodeResult.status, 0, fffNodeResult.stderr);
+NodeAssert.equal(
+  typeof JSON.parse(fffNodeResult.stdout).exports?.["."]?.require,
+  "string",
+  "Bundled @ff-labs/fff-node does not export a require entry.",
+);
 for (const [name, spec] of Object.entries(manifest.dependencies)) {
   NodeAssert.equal(
     typeof spec === "string" && spec.startsWith("catalog:"),

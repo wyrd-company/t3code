@@ -19,6 +19,7 @@ import {
 } from "../../scripts/lib/brand-assets.ts";
 import { resolveCatalogDependencies } from "../../scripts/lib/resolve-catalog.ts";
 import { bundleNodePty } from "./bundle-node-pty.mjs";
+import { stageRuntimeExternals } from "./stage-runtime-externals.mjs";
 import { packDirectory } from "./pack-directory.mjs";
 import { isForkVersion } from "./version.mjs";
 
@@ -60,6 +61,25 @@ try {
     await NodeFSP.access(NodePath.join(serverDirectory, relativePath));
   }
 
+  const serverDependencies = resolveCatalogDependencies(
+    serverPackage.dependencies,
+    workspace.catalog ?? {},
+    "apps/server",
+  );
+  const overrides = resolveCatalogDependencies(
+    workspace.overrides ?? {},
+    workspace.catalog ?? {},
+    "apps/server",
+  );
+  const runtimeExternals = await stageRuntimeExternals({
+    repoRoot,
+    stageDirectory: NodePath.join(stagingDirectory, "runtime-externals"),
+    serverDependencies,
+    patchedDependencies: workspace.patchedDependencies ?? {},
+    overrides,
+  });
+
+  // Bundled packages must also be declared, at the version that was staged.
   const packageJson = {
     name: serverPackage.name,
     version,
@@ -69,17 +89,9 @@ try {
     type: serverPackage.type,
     engines: serverPackage.engines,
     files: ["dist", "LICENSE"],
-    bundledDependencies: ["node-pty"],
-    dependencies: resolveCatalogDependencies(
-      serverPackage.dependencies,
-      workspace.catalog ?? {},
-      "apps/server",
-    ),
-    overrides: resolveCatalogDependencies(
-      workspace.overrides ?? {},
-      workspace.catalog ?? {},
-      "apps/server",
-    ),
+    bundledDependencies: ["node-pty", ...Object.keys(runtimeExternals)],
+    dependencies: { ...serverDependencies, ...runtimeExternals },
+    overrides,
   };
 
   await NodeFSP.cp(
@@ -103,6 +115,17 @@ try {
     ),
     packageDirectory: stagingDirectory,
     prebuildPath: nodePtyPrebuild,
+  });
+  for (const name of Object.keys(runtimeExternals)) {
+    await NodeFSP.cp(
+      NodePath.join(stagingDirectory, "runtime-externals", "node_modules", name),
+      NodePath.join(stagingDirectory, "node_modules", name),
+      { recursive: true },
+    );
+  }
+  await NodeFSP.rm(NodePath.join(stagingDirectory, "runtime-externals"), {
+    recursive: true,
+    force: true,
   });
 
   const brand = resolveWebAssetBrandForPackageVersion(version);

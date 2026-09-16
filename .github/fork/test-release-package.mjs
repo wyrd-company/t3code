@@ -32,13 +32,34 @@ try {
     await NodeFSP.mkdir(NodePath.dirname(target), { recursive: true });
     await NodeFSP.writeFile(target, "fixture\n");
   }
+  const bundled = [
+    "node-pty",
+    "@ff-labs/fff-node",
+    "@ff-labs/fff-bin-linux-x64-gnu",
+    "ffi-rs",
+    "@yuuang/ffi-rs-linux-x64-gnu",
+  ];
+  for (const name of bundled) {
+    const bundledManifest = NodePath.join(packageRoot, "node_modules", name, "package.json");
+    await NodeFSP.mkdir(NodePath.dirname(bundledManifest), { recursive: true });
+    await NodeFSP.writeFile(
+      bundledManifest,
+      `${JSON.stringify({
+        name,
+        exports: { ".": { import: "./dist/src/index.js", require: "./dist/src/index.js" } },
+      })}\n`,
+    );
+  }
   await NodeFSP.writeFile(
     NodePath.join(packageRoot, "package.json"),
     `${JSON.stringify({
       name: "t3",
       version: "0.0.37-wyrd.1",
-      dependencies: { "generic-dependency": "1.2.3" },
-      bundledDependencies: ["node-pty"],
+      dependencies: {
+        "generic-dependency": "1.2.3",
+        ...Object.fromEntries(bundled.map((name) => [name, "1.2.3"])),
+      },
+      bundledDependencies: bundled,
     })}\n`,
   );
 

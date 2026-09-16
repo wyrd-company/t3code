@@ -11,6 +11,11 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import { bundleNodePty } from "./bundle-node-pty.mjs";
+import {
+  collectStagedPackages,
+  planRuntimeExternals,
+  stageRuntimeExternals,
+} from "./stage-runtime-externals.mjs";
 import { packDirectory } from "./pack-directory.mjs";
 
 const fixtureRoot = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-fork-packer-test-"));
@@ -76,6 +81,85 @@ try {
   NodeAssert.notEqual(bundledHostBuild.status, 0);
 
   console.log("PASS packer-bundles-only-the-debian-node-pty-prebuild");
+
+  const plan = planRuntimeExternals({
+    serverDependencies: { "@ff-labs/fff-node": "0.9.4", effect: "1.0.0" },
+    patchedDependencies: {
+      "@ff-labs/fff-node@0.9.4": "patches/@ff-labs__fff-node@0.9.4.patch",
+      "effect@1.0.0": "patches/effect@1.0.0.patch",
+    },
+    overrides: {},
+  });
+  NodeAssert.deepEqual(plan.manifest.dependencies, {
+    "@ff-labs/fff-node": "0.9.4",
+    "@ff-labs/fff-bin-linux-x64-gnu": "0.9.4",
+    "@ff-labs/fff-bin-linux-x64-musl": "0.9.4",
+  });
+  NodeAssert.deepEqual(Object.keys(plan.workspace.patchedDependencies), [
+    "@ff-labs/fff-node@0.9.4",
+  ]);
+  NodeAssert.equal(plan.workspace.nodeLinker, "hoisted");
+  NodeAssert.throws(
+    () => planRuntimeExternals({ serverDependencies: {}, patchedDependencies: {}, overrides: {} }),
+    /does not depend on @ff-labs\/fff-node/,
+  );
+  console.log("PASS runtime-externals-plan-stages-fff-with-its-patch-and-linux-binaries");
+
+  const stageRoot = NodePath.join(fixtureRoot, "stage-root");
+  const stageDirectory = NodePath.join(stageRoot, "stage");
+  await NodeFSP.mkdir(NodePath.join(stageRoot, "patches"), { recursive: true });
+  await NodeFSP.writeFile(
+    NodePath.join(stageRoot, "patches", "@ff-labs__fff-node@0.9.4.patch"),
+    "patch\n",
+  );
+  let patchSeenByInstall = false;
+  const staged = await stageRuntimeExternals({
+    repoRoot: stageRoot,
+    stageDirectory,
+    serverDependencies: { "@ff-labs/fff-node": "0.9.4" },
+    patchedDependencies: { "@ff-labs/fff-node@0.9.4": "patches/@ff-labs__fff-node@0.9.4.patch" },
+    overrides: {},
+    install: async (cwd) => {
+      await NodeFSP.access(NodePath.join(cwd, "patches", "@ff-labs__fff-node@0.9.4.patch"));
+      patchSeenByInstall = true;
+      const modules = NodePath.join(cwd, "node_modules");
+      for (const [name, version] of [
+        ["@ff-labs/fff-node", "0.9.4"],
+        ["ffi-rs", "1.3.2"],
+      ]) {
+        await NodeFSP.mkdir(NodePath.join(modules, name), { recursive: true });
+        await NodeFSP.writeFile(
+          NodePath.join(modules, name, "package.json"),
+          `${JSON.stringify({ name, version })}\n`,
+        );
+      }
+      await NodeFSP.mkdir(NodePath.join(modules, ".pnpm"), { recursive: true });
+      await NodeFSP.mkdir(NodePath.join(modules, "ffi-rs", "node_modules", ".bin"), {
+        recursive: true,
+      });
+      await NodeFSP.writeFile(NodePath.join(modules, ".modules.yaml"), "x\n");
+    },
+  });
+  NodeAssert.ok(patchSeenByInstall);
+  NodeAssert.deepEqual(staged, { "@ff-labs/fff-node": "0.9.4", "ffi-rs": "1.3.2" });
+  NodeAssert.deepEqual(
+    await collectStagedPackages(NodePath.join(stageDirectory, "node_modules")),
+    staged,
+  );
+  for (const gone of [
+    "package.json",
+    "pnpm-workspace.yaml",
+    "patches",
+    "node_modules/.pnpm",
+    "node_modules/.modules.yaml",
+    "node_modules/ffi-rs/node_modules/.bin",
+  ]) {
+    await NodeAssert.rejects(
+      NodeFSP.access(NodePath.join(stageDirectory, gone)),
+      `${gone} survived`,
+    );
+  }
+  console.log("PASS runtime-externals-stage-keeps-only-installed-packages");
 } finally {
   await NodeFSP.rm(fixtureRoot, { recursive: true, force: true });
 }
