@@ -117,9 +117,10 @@ downstream clients on provider stop or credential revocation. These drivers
 receive no separate browser-availability signal from the registry.
 
 The gateway preserves MCP tool name, title, description, input schema, output
-schema, annotations, and `_meta`. Effect's inbound MCP tool model does not
-represent the SDK's `icons` or `execution` fields, so those fields do not reach
-Cursor through this compatibility gateway.
+schema, annotation hints, and `_meta`. Effect's inbound MCP tool model does not
+represent the SDK's `icons` or `execution` fields and folds an annotation
+`title` into the tool title, so those fields do not reach Cursor through this
+compatibility gateway.
 
 OpenCode installs per-thread MCP configuration only into a server process owned
 by that provider session. It does not install the endpoint into a configured

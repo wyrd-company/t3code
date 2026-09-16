@@ -278,7 +278,6 @@ it.effect("preserves supported tool metadata and decodes embedded resource blobs
         description: "fixture tool",
         outputSchema: { type: "object", properties: { ok: { type: "boolean" } } },
         annotations: {
-          title: "Fixture hint",
           readOnlyHint: true,
           destructiveHint: false,
           idempotentHint: true,
