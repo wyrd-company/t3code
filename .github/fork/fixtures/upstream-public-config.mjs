@@ -2,7 +2,8 @@
 // relationships:
 //   used_by: .github/fork/test.sh
 // ---
-// Generated from package/dist/bin.mjs in the public t3@0.0.37 npm tarball.
+// The build-time configuration anchors as they appear in the server bundle
+// upstream embeds in the `t3` executable of its @t3code/t3-linux-x64 package.
 
 const buildTimeRelayUrl = normalizeSecureRelayUrl("https://relay.t3.codes") ?? "";
 const buildTimeClerkPublishableKey = readBuildTimeValue("pk_live_Y2xlcmsudDMuY29kZXMk");

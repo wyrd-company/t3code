@@ -175,7 +175,7 @@ exit 23
 STUB
 chmod +x "$npm_failure"
 assert_fails_with extractor-reports-package-fetch-failure \
-  'Failed to fetch t3@0.0.37: offline registry failure' \
+  'Failed to fetch @t3code/t3-linux-x64@0.0.37: offline registry failure' \
   env NPM_COMMAND="$npm_failure" \
     node "${repo_root}/.github/fork/public-config.mjs" package '0.0.37'
 
@@ -186,7 +186,7 @@ printf '%s\n' '[{"filename":"first.tgz"},{"filename":"second.tgz"}]'
 STUB
 chmod +x "$npm_multiple"
 assert_fails_with extractor-rejects-multiple-pack-results \
-  'Unexpected npm pack response for t3@0.0.37' \
+  'Unexpected npm pack response for @t3code/t3-linux-x64@0.0.37' \
   env NPM_COMMAND="$npm_multiple" \
     node "${repo_root}/.github/fork/public-config.mjs" package '0.0.37'
 
@@ -332,10 +332,10 @@ while (( $# > 0 )); do
 done
 test -n "$destination"
 package_root="$(mktemp -d)"
-mkdir -p "${package_root}/package/dist"
-cp "$STUB_UPSTREAM_BUNDLE" "${package_root}/package/dist/bin.mjs"
-tar -czf "${destination}/t3-0.0.37.tgz" -C "$package_root" package
-printf '%s\n' '[{"filename":"t3-0.0.37.tgz"}]'
+mkdir -p "${package_root}/package"
+cp "$STUB_UPSTREAM_BUNDLE" "${package_root}/package/t3"
+tar -czf "${destination}/t3code-t3-linux-x64-0.0.37.tgz" -C "$package_root" package
+printf '%s\n' '[{"filename":"t3code-t3-linux-x64-0.0.37.tgz"}]'
 STUB
 chmod +x "$npm_release_stub"
 cp "$npm_release_stub" "${release_stubs}/npm"

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // ---
 // relationships:
-//   extracts_from: apps/server/dist/bin.mjs
+//   extracts_from:
+//     - apps/server/dist/bin.mjs
+//     - "@t3code/t3-linux-x64"
 //   used_by:
 //     - .github/fork/build-release.sh
 //     - .github/fork/assert-build-config.sh
@@ -75,32 +77,40 @@ export function extractPublicConfig(source) {
   };
 }
 
+// The public `t3` package is a launcher that spawns a platform executable from
+// `@t3code/t3-<platform>-<arch>`. The server bundle, with its build-time
+// configuration, is embedded in that executable as plain text. Linux x64 is
+// read whatever the host is: every platform package carries the same values,
+// and Linux x64 is what this fork ships.
+const UPSTREAM_EXECUTABLE_PACKAGE = "@t3code/t3-linux-x64";
+
 function extractPackage(version, bundleOutput) {
+  const spec = `${UPSTREAM_EXECUTABLE_PACKAGE}@${version}`;
   const temporaryDirectory = NodeFS.mkdtempSync(
     NodePath.join(NodeOS.tmpdir(), "t3-public-config-"),
   );
   try {
     const result = NodeChildProcess.spawnSync(
       NodeProcess.env.NPM_COMMAND ?? "npm",
-      ["pack", `t3@${version}`, "--pack-destination", temporaryDirectory, "--json"],
+      ["pack", spec, "--pack-destination", temporaryDirectory, "--json"],
       { encoding: "utf8" },
     );
     if (result.status !== 0) {
-      throw new Error(`Failed to fetch t3@${version}: ${result.stderr.trim()}`);
+      throw new Error(`Failed to fetch ${spec}: ${result.stderr.trim()}`);
     }
     const packResult = JSON.parse(result.stdout);
     if (!Array.isArray(packResult) || packResult.length !== 1 || !packResult[0]?.filename) {
-      throw new Error(`Unexpected npm pack response for t3@${version}`);
+      throw new Error(`Unexpected npm pack response for ${spec}`);
     }
     const tarball = NodePath.join(temporaryDirectory, packResult[0].filename);
     const unpack = NodeChildProcess.spawnSync("tar", ["-xzf", tarball, "-C", temporaryDirectory], {
       encoding: "utf8",
     });
-    if (unpack.status !== 0)
-      throw new Error(`Failed to unpack t3@${version}: ${unpack.stderr.trim()}`);
-    const bundlePath = NodePath.join(temporaryDirectory, "package/dist/bin.mjs");
-    const source = NodeFS.readFileSync(bundlePath, "utf8");
-    if (bundleOutput) NodeFS.copyFileSync(bundlePath, bundleOutput);
+    if (unpack.status !== 0) throw new Error(`Failed to unpack ${spec}: ${unpack.stderr.trim()}`);
+    const executablePath = NodePath.join(temporaryDirectory, "package/t3");
+    // latin1: the anchors are ASCII and the file is mostly not text.
+    const source = NodeFS.readFileSync(executablePath, "latin1");
+    if (bundleOutput) NodeFS.copyFileSync(executablePath, bundleOutput);
     return extractPublicConfig(source);
   } finally {
     NodeFS.rmSync(temporaryDirectory, { recursive: true, force: true });
