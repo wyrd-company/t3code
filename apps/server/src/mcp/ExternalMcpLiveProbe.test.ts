@@ -32,6 +32,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { HttpBody, HttpClient, HttpRouter, HttpServerRequest } from "effect/unstable/http";
@@ -39,7 +40,10 @@ import { describe } from "vite-plus/test";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerConfig from "../config.ts";
+import * as DeviceService from "../device/DeviceService.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as ProviderSessionRuntime from "../persistence/ProviderSessionRuntime.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as AnalyticsService from "../telemetry/AnalyticsService.ts";
@@ -121,6 +125,16 @@ const serve = HttpRouter.serve(
   McpHttpServer.layer.pipe(
     Layer.provide(registryLayer),
     Layer.provide(PreviewAutomationBroker.layer.pipe(Layer.provide(NodeServices.layer))),
+    Layer.provide(
+      Layer.mergeAll(
+        serverConfigLayer,
+        Layer.mock(DeviceService.DeviceService)({}),
+        Layer.mock(OrchestrationEngineService)({}),
+        Layer.mock(ProjectionSnapshotQuery)({
+          getThreadShellById: () => Effect.succeed(Option.none()),
+        }),
+      ).pipe(Layer.provideMerge(NodeServices.layer)),
+    ),
   ),
   { disableListenLog: true, disableLogger: true },
 );
@@ -156,6 +170,7 @@ const issueInternal = (threadId: ThreadId) =>
     const issued = yield* McpSessionRegistry.issueActiveMcpCredential({
       threadId,
       providerInstanceId: ProviderInstanceId.make("cursor"),
+      capabilities: new Set(["preview"]),
     });
     expect(issued).toBeDefined();
     McpProviderSession.setMcpProviderSession(issued!.config);

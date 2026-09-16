@@ -105,9 +105,10 @@ external registration does not reconfigure a running session.
 
 External registrations record browser-tools availability as false. Thread-level
 browser-tools availability is true only while the internal `t3-code` entry is
-present. Codex carries that value into its developer instructions instead of
-inferring browser-tool availability from the presence of any MCP server. Claude
-Agent receives no separate browser-availability signal.
+present and its credential grants the `preview` capability. Codex carries that
+value into its developer instructions instead of inferring browser-tool
+availability from the presence of any MCP server. Claude Agent receives no
+separate browser-availability signal.
 
 Grok receives each endpoint as an ACP HTTP MCP server. OpenCode adds each
 endpoint as a remote MCP server through the SDK. Cursor's loopback gateway is

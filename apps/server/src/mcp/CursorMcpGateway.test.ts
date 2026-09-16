@@ -177,6 +177,7 @@ const withGateway = Effect.fn("CursorMcpGatewayTest.withGateway")(function* (inp
   const issued = yield* McpSessionRegistry.issueActiveMcpCredential({
     threadId,
     providerInstanceId: ProviderInstanceId.make("cursor"),
+    capabilities: new Set(["preview"]),
   });
   if (!issued) return yield* Effect.die("registry did not issue credential");
   const sessions: ReadonlyArray<McpProviderSession.McpProviderSessionConfig> = [
@@ -372,6 +373,7 @@ it.effect("rejects another thread credential and closes on provider stop", () =>
       const other = yield* fixture.registry.issue({
         threadId: ThreadId.make("thread-gateway-other"),
         providerInstanceId: ProviderInstanceId.make("cursor"),
+        capabilities: new Set(),
       });
       const crossThread = yield* connectGateway(
         gateway.endpoint,

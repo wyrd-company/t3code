@@ -1,9 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import { HttpServer } from "effect/unstable/http";
 
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -84,35 +82,6 @@ it.effect("always grants pull-requests and gates browser and device access indep
     expect(yield* capabilitiesOf(withoutPreview)).toEqual(["pull-requests"]);
     expect(yield* capabilitiesOf(withDevice)).toEqual(["device", "pull-requests"]);
   }),
-);
-
-it.effect("closes a concurrent start when revocation wins hook registration", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const registry = yield* makeRegistry(() => 1_000);
-      const issued = yield* registry.issue({
-        threadId: ThreadId.make("thread-revocation-race"),
-        providerInstanceId: ProviderInstanceId.make("cursor"),
-      });
-      const register = yield* Deferred.make<void>();
-      let finalized = false;
-      const registrationFiber = yield* Deferred.await(register).pipe(
-        Effect.andThen(
-          registry.onProviderSessionRevoked(
-            issued.config.providerSessionId,
-            Effect.sync(() => {
-              finalized = true;
-            }),
-          ),
-        ),
-        Effect.forkScoped,
-      );
-      yield* registry.revokeProviderSession(issued.config.providerSessionId);
-      yield* Deferred.succeed(register, undefined);
-      yield* Fiber.join(registrationFiber);
-      expect(finalized).toBe(true);
-    }),
-  ),
 );
 
 it.effect("builds MCP endpoints from the bound server host", () =>

@@ -2754,9 +2754,7 @@ export const mcpRuntimeOptionsForThread = (
             `mcp_servers.${mcpSession.name}.bearer_token_env_var="${tokenEnvironmentVariable}"`,
           ];
         }),
-        ...(internalSession?.capabilities
-          ? { mcpCapabilities: internalSession.capabilities }
-          : {}),
+        ...(internalSession?.capabilities ? { mcpCapabilities: internalSession.capabilities } : {}),
         browserToolsAvailable: internalSession?.browserToolsAvailable ?? false,
       }
     : undefined;

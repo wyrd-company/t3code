@@ -12,11 +12,16 @@ import { expect, it } from "@effect/vitest";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Scope from "effect/Scope";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
+import * as ServerConfig from "../config.ts";
+import * as DeviceService from "../device/DeviceService.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { attachClaudeMcpForThread } from "../provider/Layers/ClaudeAdapter.ts";
 import { attachCodexMcpForThread } from "../provider/Layers/CodexAdapter.ts";
 import { attachCursorMcpForThread } from "../provider/Layers/CursorAdapter.ts";
@@ -65,6 +70,16 @@ const serve = HttpRouter.serve(
   McpHttpServer.layer.pipe(
     Layer.provide(mcpSessionRegistryLayer),
     Layer.provide(PreviewAutomationBroker.layer.pipe(Layer.provide(NodeServices.layer))),
+    Layer.provide(
+      Layer.mergeAll(
+        ServerConfig.layerTest(process.cwd(), { prefix: "t3-external-mcp-registration-test-" }),
+        Layer.mock(DeviceService.DeviceService)({}),
+        Layer.mock(OrchestrationEngineService)({}),
+        Layer.mock(ProjectionSnapshotQuery)({
+          getThreadShellById: () => Effect.succeed(Option.none()),
+        }),
+      ).pipe(Layer.provideMerge(NodeServices.layer)),
+    ),
   ),
   { disableListenLog: true, disableLogger: true },
 );
@@ -256,6 +271,7 @@ it.effect("registering external MCP preserves the active internal credential", (
       const issued = yield* McpSessionRegistry.issueActiveMcpCredential({
         threadId,
         providerInstanceId: ProviderInstanceId.make("codex"),
+        capabilities: new Set(["preview"]),
       });
       const rawToken = issued?.config.authorizationHeader.slice("Bearer ".length);
       expect(rawToken).toBeDefined();
