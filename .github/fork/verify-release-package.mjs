@@ -84,6 +84,16 @@ NodeAssert.equal(
   "string",
   "Bundled @ff-labs/fff-node does not export a require entry.",
 );
+// npm refuses a manifest whose overrides use pnpm's selector or removal forms.
+const assertNpmOverrides = (overrides, path = []) => {
+  for (const [key, value] of Object.entries(overrides)) {
+    NodeAssert.ok(!key.includes(">"), `Override ${[...path, key].join("/")} uses a pnpm selector.`);
+    if (typeof value === "object") assertNpmOverrides(value, [...path, key]);
+    else NodeAssert.notEqual(value, "-", `Override ${[...path, key].join("/")} is a pnpm removal.`);
+  }
+};
+assertNpmOverrides(manifest.overrides ?? {});
+
 for (const [name, spec] of Object.entries(manifest.dependencies)) {
   NodeAssert.equal(
     typeof spec === "string" && spec.startsWith("catalog:"),

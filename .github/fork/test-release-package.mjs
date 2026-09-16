@@ -60,6 +60,7 @@ try {
         ...Object.fromEntries(bundled.map((name) => [name, "1.2.3"])),
       },
       bundledDependencies: bundled,
+      overrides: { yaml: "^2.9.0", "generic-parent": { "generic-child": "1.0.0" } },
     })}\n`,
   );
 

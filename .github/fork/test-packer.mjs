@@ -16,6 +16,7 @@ import {
   planRuntimeExternals,
   stageRuntimeExternals,
 } from "./stage-runtime-externals.mjs";
+import { toNpmOverrides } from "./npm-overrides.mjs";
 import { packDirectory } from "./pack-directory.mjs";
 
 const fixtureRoot = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-fork-packer-test-"));
@@ -160,6 +161,22 @@ try {
     );
   }
   console.log("PASS runtime-externals-stage-keeps-only-installed-packages");
+
+  NodeAssert.deepEqual(
+    toNpmOverrides({
+      "generic-lib": "1.2.3",
+      "generic-parent>generic-child": "-",
+      "generic-parent>@scope/other": "^2.0.0",
+      "@scope/tool>vitest": "-",
+      "a>b>c": "3.0.0",
+    }),
+    {
+      "generic-lib": "1.2.3",
+      "generic-parent": { "@scope/other": "^2.0.0" },
+      a: { b: { c: "3.0.0" } },
+    },
+  );
+  console.log("PASS npm-overrides-nest-selectors-and-drop-removals");
 } finally {
   await NodeFSP.rm(fixtureRoot, { recursive: true, force: true });
 }

@@ -19,6 +19,7 @@ import {
 } from "../../scripts/lib/brand-assets.ts";
 import { resolveCatalogDependencies } from "../../scripts/lib/resolve-catalog.ts";
 import { bundleNodePty } from "./bundle-node-pty.mjs";
+import { toNpmOverrides } from "./npm-overrides.mjs";
 import { stageRuntimeExternals } from "./stage-runtime-externals.mjs";
 import { packDirectory } from "./pack-directory.mjs";
 import { isForkVersion } from "./version.mjs";
@@ -91,7 +92,7 @@ try {
     files: ["dist", "LICENSE"],
     bundledDependencies: ["node-pty", ...Object.keys(runtimeExternals)],
     dependencies: { ...serverDependencies, ...runtimeExternals },
-    overrides,
+    overrides: toNpmOverrides(overrides),
   };
 
   await NodeFSP.cp(
