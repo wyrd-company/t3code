@@ -72,6 +72,7 @@ NodeAssert.equal(findStep(ciSteps, "Test fork tooling").run, ".github/fork/test.
 
 const release = readWorkflow("fork-release.yml");
 NodeAssert.deepEqual(release.on.push.tags, ["server/*-wyrd.*"]);
+NodeAssert.ok("workflow_dispatch" in release.on, "the release must be rerunnable on its tag ref");
 NodeAssert.equal(release.permissions.contents, "write");
 assertUbuntuLatest(release);
 

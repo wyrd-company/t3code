@@ -11,6 +11,9 @@ on:
   push:
     tags:
       - server/*-wyrd.*
+  # The fork maintenance workflow reruns a tag whose release never appeared,
+  # on that tag's ref, so the build sees the same GITHUB_REF_NAME as a push.
+  workflow_dispatch:
 
 permissions:
   contents: write
