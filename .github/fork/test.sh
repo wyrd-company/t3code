@@ -331,6 +331,7 @@ while (( $# > 0 )); do
   shift
 done
 test -n "$destination"
+if [[ -n "${STUB_NPM_MARKER:-}" ]]; then : >"$STUB_NPM_MARKER"; fi
 package_root="$(mktemp -d)"
 mkdir -p "${package_root}/package"
 cp "$STUB_UPSTREAM_BUNDLE" "${package_root}/package/t3"
@@ -339,10 +340,22 @@ printf '%s\n' '[{"filename":"t3code-t3-linux-x64-0.0.37.tgz"}]'
 STUB
 chmod +x "$npm_release_stub"
 cp "$npm_release_stub" "${release_stubs}/npm"
+# The node on PATH may be a version-manager shim that puts its own bin
+# directory, where the real npm lives, ahead of everything for the process it
+# starts. Run the real binary so the extractor's child sees the PATH set here;
+# the marker proves the stub answered rather than the registry.
+real_node="$(node -p 'process.execPath')"
+cat >"${release_stubs}/node" <<STUB
+#!/usr/bin/env bash
+exec "$real_node" "\$@"
+STUB
+chmod +x "${release_stubs}/node"
+npm_marker="${fixture_root}/default-npm-called"
 if ! PATH="${release_stubs}:$PATH" \
   STUB_UPSTREAM_BUNDLE="$upstream_bundle" \
+  STUB_NPM_MARKER="$npm_marker" \
   env -u NPM_COMMAND node "${repo_root}/.github/fork/public-config.mjs" \
-    package "$upstream_version" >/dev/null; then
+    package "$upstream_version" >/dev/null || [[ ! -f "$npm_marker" ]]; then
   echo "FAIL extractor-uses-default-npm-command" >&2
   exit 1
 fi
