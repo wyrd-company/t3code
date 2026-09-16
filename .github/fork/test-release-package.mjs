@@ -24,7 +24,7 @@ try {
     "dist/bin.mjs",
     "dist/client/index.html",
     "dist/resource-monitor/linux-x64/t3-resource-monitor",
-    "dist/service-launcher.mjs",
+    "dist/claude-history-worker.mjs",
     "node_modules/node-pty/prebuilds/linux-x64/pty.node",
   ];
   for (const relativePath of requiredFiles) {

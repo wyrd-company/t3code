@@ -28,7 +28,7 @@ for (const requiredEntry of [
   "package/dist/bin.mjs",
   "package/dist/client/index.html",
   "package/dist/resource-monitor/linux-x64/t3-resource-monitor",
-  "package/dist/service-launcher.mjs",
+  "package/dist/claude-history-worker.mjs",
   "package/node_modules/node-pty/prebuilds/linux-x64/pty.node",
   "package/package.json",
 ]) {

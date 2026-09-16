@@ -52,7 +52,7 @@ try {
   );
   const requiredBuildAssets = [
     "dist/bin.mjs",
-    "dist/service-launcher.mjs",
+    "dist/claude-history-worker.mjs",
     "dist/client/index.html",
   ];
 
