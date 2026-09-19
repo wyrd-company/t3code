@@ -16,6 +16,18 @@ This repository keeps `main` as a pristine mirror of `pingdotgg/t3code`. Fork ch
 
 Do not merge the fork branches together. Do not merge upstream into either branch.
 
+## Invariants
+
+Stock clients are not impacted. `web-image` publishes the unmodified upstream
+web client and it runs against this fork's server; the mobile client likewise.
+Nothing the fork does requires a client change, or changes what a stock client
+receives or has to understand.
+
+The shared contract is outside the fork's surface. `packages/contracts`,
+`packages/client-runtime`, `packages/shared`, `apps/web`, `apps/mobile`, and
+the WebSocket, orchestration, and persistence layers are upstream's. The fork
+adds server-side surfaces of its own under `apps/server/src/mcp/` instead.
+
 ## Base and rebase
 
 Each fork branch is our commits replayed onto one upstream release, so the
@@ -175,3 +187,45 @@ It needs Docker, the devcontainer CLI, and Codex credentials at
 `~/.codex/auth.json`, which are mounted read-only into the container. Run it on
 demand. It is never a CI or release gate: it spends real provider credentials
 and depends on a harness this repository does not control.
+
+## Native provider session lookup
+
+The server branch answers authenticated `GET` requests at
+`/api/mcp/provider-session`. The operation requires the
+`orchestration:operate` environment scope and uses the same bearer
+authentication and the same failure responses as the `PUT` and `DELETE`
+operations on that path. It introduces no credential and no scope of its own.
+
+The request carries the T3 thread ID as the `threadId` query parameter. A
+missing, empty, or malformed thread ID is rejected with `400` and the shared
+`invalid_external_mcp_registration` body, the validation the `PUT` operation
+applies to its own thread ID.
+
+A thread whose live provider session has announced its harness identifier is
+answered with `200` and the JSON body `{"nativeSessionId": "<value>"}`. The
+value is the identifier exactly as the harness gave it, never trimmed or
+normalized. An unknown thread, a thread with no provider session, and a
+session that has not announced an identifier yet are each answered with `404`
+and `{"error": "native_session_unknown"}`. No response carries a credential,
+an authorization header, a resume cursor, or anything about session content.
+
+The identifier is the one a harness gives its own hooks, so a consumer holding
+a Stop hook's `session_id` can map it back to the thread it started. Claude
+Agent announces the SDK `session_id` carried by every durable message. Codex
+announces the native thread ID its start and resume responses carry. Cursor,
+Grok, and OpenCode have no hook session identifier of their own in this
+integration and announce nothing, so a lookup for one of their threads is
+answered with `404`.
+
+An announcement belongs to one occurrence of one provider session on one
+thread. Starting a session opens a new occurrence and discards what the
+previous one knew, so a replaced session stops being answered for before its
+replacement announces anything. An announcement or a stop that quotes a
+retired occurrence is ignored, so a delayed event can neither restore a
+replaced identifier nor reach another thread. Later turns in a live session
+re-announce the same identifier, and stopping a session clears it.
+
+The record is held in the server process. A restart loses it, and the thread
+is answered with `404` until its provider session starts again, which is the
+earliest moment a harness hook can fire. Persisting it would mean changing
+upstream's persistence and migrations, which are outside the fork's surface.
