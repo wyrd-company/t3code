@@ -7,6 +7,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as McpProviderSession from "./McpProviderSession.ts";
+import * as NativeSessionRegistry from "./NativeSessionRegistry.ts";
 
 export const EXTERNAL_MCP_REGISTRATION_PATH = "/api/mcp/provider-session";
 
@@ -26,12 +27,22 @@ const ExternalMcpClear = Schema.Struct({
   threadId: ThreadId,
 });
 
+const NativeSessionQuery = Schema.Struct({
+  threadId: ThreadId,
+});
+
 const decodeRegistration = Schema.decodeUnknownEffect(ExternalMcpRegistration);
 const decodeClear = Schema.decodeUnknownEffect(ExternalMcpClear);
+const decodeNativeSessionQuery = Schema.decodeUnknownEffect(NativeSessionQuery);
 
 const invalidRequest = HttpServerResponse.jsonUnsafe(
   { error: "invalid_external_mcp_registration" },
   { status: 400, headers: { "cache-control": "no-store" } },
+);
+
+const nativeSessionUnknown = HttpServerResponse.jsonUnsafe(
+  { error: "native_session_unknown" },
+  { status: 404, headers: { "cache-control": "no-store" } },
 );
 
 const unauthorized = HttpServerResponse.jsonUnsafe(
@@ -121,6 +132,29 @@ const clearRoute = HttpRouter.add(
   }),
 );
 
-export const layer = Layer.mergeAll(registerRoute, clearRoute).pipe(
+const readNativeSessionRoute = HttpRouter.add(
+  "GET",
+  EXTERNAL_MCP_REGISTRATION_PATH,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (url._tag === "None") return invalidRequest;
+    const input = yield* decodeNativeSessionQuery({
+      threadId: url.value.searchParams.get("threadId") ?? undefined,
+    }).pipe(Effect.option);
+    if (input._tag === "None") return invalidRequest;
+
+    const nativeSessionId = yield* Effect.sync(() =>
+      NativeSessionRegistry.readNativeSessionId(input.value.threadId),
+    );
+    if (nativeSessionId === undefined) return nativeSessionUnknown;
+    return HttpServerResponse.jsonUnsafe(
+      { nativeSessionId },
+      { status: 200, headers: { "cache-control": "no-store" } },
+    );
+  }),
+);
+
+export const layer = Layer.mergeAll(registerRoute, clearRoute, readNativeSessionRoute).pipe(
   Layer.provide(AuthMiddlewareLive),
 );
