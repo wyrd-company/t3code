@@ -48,6 +48,7 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import * as NativeSessionRegistry from "../../mcp/NativeSessionRegistry.ts";
 
 import {
   ProviderAdapterRequestError,
@@ -102,6 +103,7 @@ export interface CodexAdapterLiveOptions {
 
 interface CodexAdapterSessionContext {
   readonly threadId: ThreadId;
+  readonly nativeSessionOccurrence: NativeSessionRegistry.NativeSessionOccurrence;
   readonly scope: Scope.Closeable;
   readonly runtime: CodexSessionRuntimeShape;
   readonly eventFiber: Fiber.Fiber<void, never>;
@@ -2250,6 +2252,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           yield* Effect.suspend(() => stopSessionInternal(existing));
         }
 
+        // Opened before the harness reports anything, so a replacement stops
+        // answering with the replaced session's identifier straight away.
+        const nativeSessionOccurrence = NativeSessionRegistry.beginNativeSession(input.threadId);
+
         const serviceTier =
           input.modelSelection?.instanceId === boundInstanceId
             ? getCodexServiceTierOptionValue(input.modelSelection)
@@ -2284,9 +2290,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         let rateLimits: CodexRateLimitSnapshot | undefined;
         const sessionScope = yield* Scope.make("sequential");
         let sessionScopeTransferred = false;
-        yield* Effect.addFinalizer(() =>
-          sessionScopeTransferred ? Effect.void : Scope.close(sessionScope, Exit.void),
-        );
+        yield* Effect.addFinalizer(() => {
+          if (sessionScopeTransferred) return Effect.void;
+          NativeSessionRegistry.endNativeSession(nativeSessionOccurrence);
+          return Scope.close(sessionScope, Exit.void);
+        });
         const createRuntime = options?.makeRuntime ?? makeCodexSessionRuntime;
         const runtime = yield* createRuntime(runtimeInput).pipe(
           Effect.provideService(Scope.Scope, sessionScope),
@@ -2447,8 +2455,17 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ),
         );
 
+        // A resume answers with the native thread id in its cursor and may
+        // send no thread/started notification at all.
+        if (isCodexResumeCursorSchema(started.resumeCursor))
+          NativeSessionRegistry.announceNativeSession(
+            nativeSessionOccurrence,
+            started.resumeCursor.threadId,
+          );
+
         sessions.set(input.threadId, {
           threadId: input.threadId,
+          nativeSessionOccurrence,
           scope: sessionScope,
           runtime,
           eventFiber,
@@ -2656,6 +2673,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       return;
     }
     session.stopped = true;
+    NativeSessionRegistry.endNativeSession(session.nativeSessionOccurrence);
     sessions.delete(session.threadId);
     yield* session.runtime.close.pipe(Effect.ignore);
     yield* Effect.ignore(Scope.close(session.scope, Exit.void));
