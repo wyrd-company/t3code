@@ -88,6 +88,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import * as NativeSessionRegistry from "../../mcp/NativeSessionRegistry.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { claudeSignedOutMessage, makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { planClaudeSkillDispatch } from "../Drivers/ClaudeSkillDispatch.ts";
@@ -313,6 +314,7 @@ function rememberPendingTaskModel(
 }
 
 interface ClaudeSessionContext {
+  readonly nativeSessionOccurrence: NativeSessionRegistry.NativeSessionOccurrence;
   session: ProviderSession;
   startInput: Parameters<ClaudeAdapterShape["startSession"]>[0];
   readonly turnStartMessageIds: Array<string | null>;
@@ -2280,6 +2282,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return;
     }
     const nextThreadId = message.session_id;
+    NativeSessionRegistry.announceNativeSession(context.nativeSessionOccurrence, nextThreadId);
     context.resumeSessionId = message.session_id;
     yield* updateResumeCursor(context);
 
@@ -4155,6 +4158,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       yield* Fiber.interrupt(streamFiber);
     }
 
+    NativeSessionRegistry.endNativeSession(context.nativeSessionOccurrence);
+
     const updatedAt = yield* nowIso;
     context.session = {
       ...context.session,
@@ -4230,6 +4235,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
       }
 
+      // Opened before the harness reports anything, so a replacement stops
+      // answering with the replaced session's identifier straight away.
+      const nativeSessionOccurrence = NativeSessionRegistry.beginNativeSession(input.threadId);
       const startedAt = yield* nowIso;
       const resumeState = readClaudeResumeState(input.resumeCursor);
       const threadId = input.threadId;
@@ -4814,6 +4822,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       };
 
       const context: ClaudeSessionContext = {
+        nativeSessionOccurrence,
         session,
         startInput: input,
         turnStartMessageIds: resumeState?.turnStartMessageIds
