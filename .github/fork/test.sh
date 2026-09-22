@@ -9,6 +9,7 @@
 #     - .github/fork/test-public-config-names.mjs
 #     - .github/fork/set-package-version.mjs
 #     - .github/fork/release-version.mjs
+#     - .github/fork/build-archive.sh
 #     - .github/fork/bundle-node-pty.mjs
 #     - .github/fork/test-packer.mjs
 #     - .github/fork/test-release-package.mjs
@@ -542,6 +543,107 @@ assert_fails_with release-build-detects-package-restore-failure \
     "${upstream_version}-wyrd.1" "${fixture_root}/release-output"
 git -C "$release_repo" show HEAD:apps/server/package.json \
   >"${release_repo}/apps/server/package.json"
+
+# The archive build reuses upstream's scripts by path, so the fixture stands
+# them in with plain scripts at those paths. Node runs a .ts file that carries
+# no type syntax.
+archive_repo="${fixture_root}/archive-repo"
+mkdir -p "${archive_repo}/.github" "${archive_repo}/apps/server/scripts" \
+  "${archive_repo}/apps/server/dist/client" \
+  "${archive_repo}/apps/server/dist/resource-monitor/linux-x64" \
+  "${archive_repo}/scripts"
+cp -R "${repo_root}/.github/fork" "${archive_repo}/.github/fork"
+printf '{"name":"generic","version":"0.0.36"}\n' >"${archive_repo}/apps/server/package.json"
+printf '<!doctype html>\n' >"${archive_repo}/apps/server/dist/client/index.html"
+printf 'monitor\n' >"${archive_repo}/apps/server/dist/resource-monitor/linux-x64/t3-resource-monitor"
+cat >"${archive_repo}/apps/server/scripts/cli.ts" <<'STUB'
+const fs = require("node:fs");
+const path = require("node:path");
+if (process.argv[2] !== "build-exe") process.exit(3);
+const version = require(path.resolve("apps/server/package.json")).version;
+if (process.env.STUB_EXE_FAILS === "1") {
+  console.error("single-executable build failed");
+  process.exit(7);
+}
+fs.mkdirSync("apps/server/dist-exe", { recursive: true });
+fs.writeFileSync("apps/server/dist-exe/t3", `exe ${version}\n`);
+STUB
+cat >"${archive_repo}/scripts/build-cli-archive.ts" <<'STUB'
+const fs = require("node:fs");
+const path = require("node:path");
+const args = process.argv.slice(2);
+const flag = (name) => args[args.indexOf(name) + 1];
+if (flag("--platform") !== "linux" || flag("--arch") !== "x64") process.exit(4);
+const exe = fs.readFileSync("apps/server/dist-exe/t3", "utf8").trim();
+if (exe !== `exe ${flag("--version")}`) process.exit(5);
+fs.mkdirSync(flag("--output-dir"), { recursive: true });
+fs.writeFileSync(
+  path.join(flag("--output-dir"), `t3-${flag("--version")}-linux-x64.tar.gz`),
+  `archive ${flag("--version")}\n`,
+);
+STUB
+cat >"${archive_repo}/scripts/smoke-cli-archive.ts" <<'STUB'
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+const flag = (name) => args[args.indexOf(name) + 1];
+const archive = fs.readFileSync(flag("--archive"), "utf8").trim();
+if (archive !== `archive ${flag("--expect-version")}`) process.exit(6);
+STUB
+git -C "$archive_repo" init --quiet
+git -C "$archive_repo" config user.name "Archive Build Test"
+git -C "$archive_repo" config user.email "archive-build@example.invalid"
+git -C "$archive_repo" add .
+git -C "$archive_repo" commit --quiet -m fixture
+archive_output="${fixture_root}/archive-output"
+if ! (cd "$archive_repo" && .github/fork/build-archive.sh \
+  "${upstream_version}-wyrd.1" "$archive_output" >"${fixture_root}/archive.out"); then
+  echo "FAIL archive-build-completes-success-path" >&2
+  exit 1
+fi
+if [[ "$(cat "${archive_output}/t3-${upstream_version}-wyrd.1-linux-x64.tar.gz")" \
+  != "archive ${upstream_version}-wyrd.1" ]]; then
+  echo "FAIL archive-build-names-the-linux-x64-archive-after-the-fork-version" >&2
+  exit 1
+fi
+if [[ "$(tail -n 1 "${fixture_root}/archive.out")" \
+  != "${archive_output}/t3-${upstream_version}-wyrd.1-linux-x64.tar.gz" ]]; then
+  echo "FAIL archive-build-prints-the-archive-path" >&2
+  exit 1
+fi
+if ! git -C "$archive_repo" diff --quiet -- apps/server/package.json; then
+  echo "FAIL archive-build-restores-package-after-success" >&2
+  exit 1
+fi
+echo "PASS archive-build-completes-success-path"
+echo "PASS archive-build-names-the-linux-x64-archive-after-the-fork-version"
+echo "PASS archive-build-restores-package-after-success"
+
+# $1 belongs to the nested shell.
+# shellcheck disable=SC2016
+assert_fails_with archive-build-restores-package-after-failure \
+  'single-executable build failed' \
+  env STUB_EXE_FAILS=1 \
+    bash -c 'cd "$1" && .github/fork/build-archive.sh "$2" "$3"' _ \
+    "$archive_repo" "${upstream_version}-wyrd.1" "$archive_output"
+if ! git -C "$archive_repo" diff --quiet -- apps/server/package.json; then
+  echo "FAIL archive-build-restores-package-after-failure" >&2
+  exit 1
+fi
+
+# $1 belongs to the nested shell.
+# shellcheck disable=SC2016
+assert_fails_with archive-build-rejects-a-version-without-a-counter \
+  'does not carry a -wyrd counter' \
+  bash -c 'cd "$1" && .github/fork/build-archive.sh "$2" "$3"' _ \
+    "$archive_repo" "$upstream_version" "$archive_output"
+
+rm -f "${archive_repo}/apps/server/dist/client/index.html"
+# $1 belongs to the nested shell.
+# shellcheck disable=SC2016
+assert_fails_with archive-build-requires-the-tarball-build-outputs \
+  'run build-release.sh first' \
+  bash -c 'cd "$1" && .github/fork/build-archive.sh "$2" "$3"' _ \
+    "$archive_repo" "${upstream_version}-wyrd.1" "$archive_output"
 
 package_fixture="${fixture_root}/package.json"
 printf '{"name":"generic","version":"1.0.0"}\n' >"$package_fixture"

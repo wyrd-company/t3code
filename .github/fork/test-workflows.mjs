@@ -117,6 +117,66 @@ NodeAssert.match(
   /t3 v\$EXPECTED_VERSION/,
 );
 NodeAssert.match(findStep(releaseSteps, "Publish GitHub Release").run, /gh release create/);
+
+// The self-contained CLI archive is built after the tarball, from the same
+// fork version, and its checksum file is written from the bytes uploaded.
+const archiveStep = findStep(releaseSteps, "Build CLI archive");
+NodeAssert.match(archiveStep.run, /build-archive\.sh/);
+NodeAssert.match(archiveStep.env.VP_NODE_VERSION, /^\d+\.\d+\.\d+$/);
+NodeAssert.ok(
+  releaseSteps.indexOf(findStep(releaseSteps, "Build release tarball")) <
+    releaseSteps.indexOf(archiveStep),
+  "the archive is assembled from the tarball build's outputs",
+);
+const checksumStep = findStep(releaseSteps, "Write CLI archive checksums");
+NodeAssert.match(checksumStep.run, /sha256sum t3-\*\.tar\.gz > SHA256SUMS/);
+NodeAssert.ok(
+  releaseSteps.indexOf(checksumStep) <
+    releaseSteps.indexOf(findStep(releaseSteps, "Publish GitHub Release")),
+  "checksums are written before the release is published",
+);
+const publishStep = findStep(releaseSteps, "Publish GitHub Release");
+for (const asset of ["$ASSET_NAME", "$ARCHIVE_NAME", "SHA256SUMS"]) {
+  NodeAssert.match(
+    publishStep.run,
+    new RegExp(`release-assets/${asset.replace(/\$/g, "\\$")}`),
+    `the release publishes ${asset}`,
+  );
+}
+NodeAssert.equal(publishStep.env.ARCHIVE_NAME, "${{ steps.release.outputs.archive }}");
+NodeAssert.match(
+  findStep(releaseSteps, "Resolve release version").run,
+  /archive=t3-\$\{version\}-linux-x64\.tar\.gz/,
+);
+
+// The archive must run without Node: it is verified from a Node-less image.
+const archiveVerify = findStep(releaseSteps, "Verify anonymous release archive");
+NodeAssert.match(archiveVerify.run, /debian:bookworm-slim/);
+NodeAssert.match(archiveVerify.run, /! command -v node/);
+NodeAssert.match(archiveVerify.run, /sha256sum --check/);
+NodeAssert.match(archiveVerify.run, /--strip-components=1/);
+NodeAssert.match(archiveVerify.run, /t3 v\$EXPECTED_VERSION/);
+
+// A dry run proves the build on any ref: it must skip every step that
+// publishes or reads the published release, and only those.
+NodeAssert.equal(release.on.workflow_dispatch.inputs.dry_run.type, "boolean");
+NodeAssert.equal(release.on.workflow_dispatch.inputs.dry_run.default, false);
+NodeAssert.equal(release.on.workflow_dispatch.inputs.version.type, "string");
+NodeAssert.equal(releaseJob.env.DRY_RUN, "${{ inputs.dry_run == true }}");
+NodeAssert.equal(
+  findStep(releaseSteps, "Resolve release version").env.REQUESTED_VERSION,
+  "${{ inputs.version }}",
+);
+const gated = new Set([
+  "Publish GitHub Release",
+  "Verify anonymous release install",
+  "Verify anonymous release archive",
+  "Remove failed release",
+]);
+for (const step of releaseSteps) {
+  const isGated = typeof step.if === "string" && step.if.includes("env.DRY_RUN != 'true'");
+  NodeAssert.equal(isGated, gated.has(step.name), `dry_run gating on step: ${step.name}`);
+}
 NodeAssert.match(
   findStep(releaseSteps, "Verify anonymous release install").run,
   /node:24-bookworm-slim/,
