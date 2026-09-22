@@ -4,6 +4,7 @@
 #   uses:
 #     - .github/fork/release-version.mjs
 #     - .github/fork/build-release.sh
+#     - .github/fork/build-archive.sh
 # ---
 name: Fork server release
 
@@ -13,7 +14,20 @@ on:
       - server/*-wyrd.*
   # The fork maintenance workflow reruns a tag whose release never appeared,
   # on that tag's ref, so the build sees the same GITHUB_REF_NAME as a push.
+  # A dry run on any ref builds and verifies the assets for a named version
+  # without publishing, which is how a change to the build is proven before a
+  # tag exists.
   workflow_dispatch:
+    inputs:
+      version:
+        description: Fork version to build (X.Y.Z-wyrd.N); defaults to the tag ref
+        required: false
+        type: string
+      dry_run:
+        description: Build and verify the assets without publishing a release
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -28,6 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
+      DRY_RUN: ${{ inputs.dry_run == true }}
       T3CODE_RELAY_URL: ${{ vars.T3CODE_RELAY_URL }}
       T3CODE_CLERK_PUBLISHABLE_KEY: ${{ vars.T3CODE_CLERK_PUBLISHABLE_KEY }}
       T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID }}
@@ -43,10 +58,17 @@ jobs:
 
       - name: Resolve release version
         id: release
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
-          version="$(.github/fork/release-version.mjs "$GITHUB_REF_NAME")"
+          if [[ -n "$REQUESTED_VERSION" ]]; then
+            version="$(.github/fork/release-version.mjs "server/$REQUESTED_VERSION")"
+          else
+            version="$(.github/fork/release-version.mjs "$GITHUB_REF_NAME")"
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "asset=t3-${version}.tgz" >> "$GITHUB_OUTPUT"
+          echo "archive=t3-${version}-linux-x64.tar.gz" >> "$GITHUB_OUTPUT"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -69,6 +91,27 @@ jobs:
             "${{ steps.release.outputs.version }}" \
             "$RUNNER_TEMP/release-assets"
 
+      # The single-executable needs a Node that supports --build-sea (25.7+);
+      # the repo itself stays on the engines.node version. The exact version,
+      # not a major: vp downloads it from nodejs.org/dist on the runner, and
+      # only exact versions have a dist directory. Keep in step with
+      # SEA_NODE_VERSION in apps/server/vite.config.ts.
+      - name: Build CLI archive
+        env:
+          VP_NODE_VERSION: "26.8.2"
+        run: |
+          .github/fork/build-archive.sh \
+            "${{ steps.release.outputs.version }}" \
+            "$RUNNER_TEMP/release-assets"
+
+      # Installers verify the archive against this file, so it is written
+      # from the bytes that get uploaded.
+      - name: Write CLI archive checksums
+        run: |
+          cd "$RUNNER_TEMP/release-assets"
+          sha256sum t3-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
       - name: Verify clean local install
         env:
           ASSET_NAME: ${{ steps.release.outputs.asset }}
@@ -88,21 +131,26 @@ jobs:
             '
 
       - name: Publish GitHub Release
+        if: env.DRY_RUN != 'true'
         id: publish
         env:
           GH_TOKEN: ${{ github.token }}
           ASSET_NAME: ${{ steps.release.outputs.asset }}
+          ARCHIVE_NAME: ${{ steps.release.outputs.archive }}
           VERSION: ${{ steps.release.outputs.version }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
             "$RUNNER_TEMP/release-assets/$ASSET_NAME" \
+            "$RUNNER_TEMP/release-assets/$ARCHIVE_NAME" \
+            "$RUNNER_TEMP/release-assets/SHA256SUMS" \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --latest=false \
             --title "T3 Code Server $VERSION" \
-            --notes "Linux x64 server package for the Wyrd Company T3 Code fork."
+            --notes "Linux x64 server package and self-contained CLI archive for the Wyrd Company T3 Code fork."
 
       - name: Verify anonymous release install
+        if: env.DRY_RUN != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           ASSET_NAME: ${{ steps.release.outputs.asset }}
@@ -124,8 +172,43 @@ jobs:
               test "$(t3 --version)" = "t3 v$EXPECTED_VERSION"
             '
 
+      # No Node in the image: the archive must carry everything it runs on.
+      - name: Verify anonymous release archive
+        if: env.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVE_NAME: ${{ steps.release.outputs.archive }}
+          EXPECTED_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          asset_url() {
+            gh release view "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json assets \
+              --jq ".assets[] | select(.name == \"$1\") | .url"
+          }
+          archive_url="$(asset_url "$ARCHIVE_NAME")"
+          checksums_url="$(asset_url SHA256SUMS)"
+          test -n "$archive_url"
+          test -n "$checksums_url"
+          docker run --rm \
+            --env ARCHIVE_URL="$archive_url" \
+            --env CHECKSUMS_URL="$checksums_url" \
+            --env ARCHIVE_NAME \
+            --env EXPECTED_VERSION \
+            debian:bookworm-slim \
+            sh -ceu '
+              apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates curl >/dev/null
+              ! command -v node
+              mkdir /runtime && cd /runtime
+              curl -fsSL -o SHA256SUMS "$CHECKSUMS_URL"
+              curl -fsSL -o "$ARCHIVE_NAME" "$ARCHIVE_URL"
+              sha256sum --check --ignore-missing --strict SHA256SUMS
+              tar -xzf "$ARCHIVE_NAME" --strip-components=1
+              test "$(./t3 --version)" = "t3 v$EXPECTED_VERSION"
+            '
+
       - name: Remove failed release
-        if: failure() && steps.publish.outcome == 'success'
+        if: env.DRY_RUN != 'true' && failure() && steps.publish.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release delete "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --yes
