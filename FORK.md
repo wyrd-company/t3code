@@ -84,7 +84,7 @@ The executable source of this list is [.github/fork/allowlist.txt](.github/fork/
 Server tags use `server/<upstream-version>-wyrd.<release>`, for example `server/0.0.37-wyrd.1`. This namespace cannot match upstream's `v*.*.*` release trigger. A tag builds the server and Linux x64 resource monitor and publishes three public GitHub Release assets:
 
 - `t3-<version>.tgz`, the npm package. It bundles a Linux x64 `node-pty` prebuild produced on Debian so installation does not require Python or a C++ toolchain.
-- `t3-<version>-linux-x64.tar.gz`, upstream's self-contained CLI archive: the single-executable, the web client, the resource monitor, and the runtime-external native packages beside it. It runs without Node, npm, or a compiler on the machine that unpacks it, which is what the server's service launcher (`t3 __service-launcher`) and self-update path require of a pinned runtime.
+- `t3-<version>-linux-x64.tar.gz`, upstream's self-contained CLI archive: the single-executable, the web client, the resource monitor, and the runtime-external native packages beside it. It runs without Node, npm, or a compiler on the machine that unpacks it, so an installer can pin it in place and switch between versions without a package manager.
 - `SHA256SUMS`, the checksum file the runtime installers verify the archive against.
 
 Both packages report the fork version from `t3 --version`. The archive is assembled by [.github/fork/build-archive.sh](.github/fork/build-archive.sh) from the tarball build's outputs, through upstream's `build-exe`, `build-cli-archive.ts`, and `smoke-cli-archive.ts`, and the release proves it from a Node-less container before the workflow completes.

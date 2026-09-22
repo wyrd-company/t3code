@@ -14,8 +14,8 @@
 # Packages the server as upstream's self-contained Linux x64 CLI archive:
 # the single-executable, the web client, the resource monitor, and the
 # runtime-external native packages beside it. Nothing in the archive needs
-# Node, npm, or a compiler on the machine that unpacks it, which is what lets
-# the server's own service launcher and self-update path run it.
+# Node, npm, or a compiler on the machine that unpacks it, so an installer can
+# pin it in place and switch between versions without a package manager.
 #
 # Runs after build-release.sh, which leaves apps/server/dist/client and
 # apps/server/dist/resource-monitor/linux-x64 behind. The executable is built
