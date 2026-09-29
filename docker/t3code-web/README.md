@@ -64,7 +64,6 @@ The surface report must show only added files under `docker/t3code-web/` and
 `.github/workflows/`. Nothing records the new base: it is the commit the branch
 and `main` now share. After the rebase:
 
-1. Compare `ARG VITE_PLUS_VERSION` in the Dockerfile with
-   `.catalog."vite-plus"` in `pnpm-workspace.yaml` and update it when needed.
-2. Build and run the image before publishing a matching `web/<new-version>` tag
-   to `origin`.
+Build and run the image before publishing a matching `web/<new-version>` tag
+to `origin`. The Dockerfile reads the Vite Plus version from the workspace
+catalog. `--build-arg VITE_PLUS_VERSION=<version>` overrides it for a local build.
