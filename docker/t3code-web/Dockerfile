@@ -13,7 +13,7 @@ ARG NGINX_IMAGE=nginx:1.29-alpine
 FROM ${NODE_IMAGE} AS build
 
 ARG T3CODE_VERSION
-ARG VITE_PLUS_VERSION=0.3.0
+ARG VITE_PLUS_VERSION
 
 RUN test -n "${T3CODE_VERSION}" \
     && apt-get update \
@@ -24,7 +24,10 @@ WORKDIR /src
 
 COPY . .
 
-RUN npm install --global "vite-plus@${VITE_PLUS_VERSION}" \
+# Use the checkout's toolchain unless the caller supplies a build override.
+RUN vite_plus_version="${VITE_PLUS_VERSION:-$(awk '$1 == "vite-plus:" { print $2; exit }' pnpm-workspace.yaml)}" \
+    && test -n "${vite_plus_version}" \
+    && npm install --global "vite-plus@${vite_plus_version}" \
     && vp install --filter '@t3tools/scripts...' --filter '@t3tools/web...'
 
 RUN APP_VERSION="${T3CODE_VERSION}" \
