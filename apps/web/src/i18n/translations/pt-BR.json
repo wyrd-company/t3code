@@ -13014,5 +13014,53 @@
       "v": "v"
     },
     " mais em Itens vinculados"
-  ]
+  ],
+  "6d12d51cbe8a951b": "Permitir nesta thread",
+  "c930be62cb5d1953": "Permitir neste projeto",
+  "23d4b1ccde62bc53": "Permitir neste provedor",
+  "3f1f3a09c2b6c179": "Permitido nesta thread",
+  "1752c6e991f256fe": "Permitido neste projeto",
+  "640301b2022d9983": "Permitido neste provedor",
+  "9e5e9c9432b3fa4a": "Fechado sem resposta",
+  "8c49e90370143fb5": [
+    "Perfil de navegador ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "526f8417faeca2a9": [
+    "Deixar o agente usar seu perfil do navegador ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "?"
+  ],
+  "95329f3d1d4ff201": "Ele quer abrir uma aba conectada como você. Assim, poderá agir em todos os sites em que este perfil está conectado.",
+  "84863aa02398a35f": [
+    "Ele quer abrir ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " conectado como você. Assim, poderá agir em todos os sites em que este perfil está conectado."
+  ],
+  "3c4c1cc52031f91f": "Só quem pode executar agentes nesta máquina pode responder.",
+  "e30867e6282aa5ba": "Para permitir além desta thread, é preciso permissão para alterar as configurações.",
+  "d0eb90f0a42166b7": "Não permitir",
+  "e55d9ca20554efe1": "Redefinir a aprovação de perfis conectados para o padrão",
+  "4c46030debd09138": "Perguntar antes que agentes usem perfis conectados",
+  "cf7bbe2684e614ef": "Os agentes usam estes perfis conectados sem perguntar. Remover um também interrompe as abas de agentes já abertas nele.",
+  "9f28638571b5e34b": "Deixar de permitir {name}",
+  "e4735c286c0ae871": "Thread: {title}",
+  "ca986bad5a996a23": "Projeto: {name}",
+  "9a0abf602fbbc4c4": "Provedor: {name}",
+  "60cf308ca54ed5d2": "anônimo logins cookies sessões aprovar permissão conceder agente navegador",
+  "68b57dc6fff8c2a0": "Perfis permitidos",
+  "a9710b616106a6d7": "perfis conectados agentes aprovados permissões revogar remover anônimo",
+  "a4ed1aa1aa0ce837": "As abas dos agentes abrem em modo anônimo, a menos que você tenha permitido seu perfil padrão. Um agente pergunta antes de usar um perfil conectado, e você escolhe se isso vale para a thread, o projeto ou o provedor."
 }

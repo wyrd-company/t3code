@@ -247,6 +247,7 @@ const STANDALONE_V2_ITEM_TYPES = new Set<OrchestrationV2ProjectedTurnItem["item"
   "secret_request",
   "feedback_request",
   "link_request",
+  "browser_profile_request",
   "subagent",
 ]);
 
@@ -257,6 +258,7 @@ const PERSISTENT_RESOURCE_V2_ITEM_TYPES = new Set<OrchestrationV2TurnItem["type"
   "secret_request",
   "feedback_request",
   "link_request",
+  "browser_profile_request",
 ]);
 
 export function timelineEntryIsPersistentResourceCard(entry: TimelineEntry): boolean {

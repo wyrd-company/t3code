@@ -1138,6 +1138,18 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [msg("allow disable enable open drive preview tools sessions project override")],
   },
   {
+    id: "agent-browser-profile-approval",
+    title: msg("Ask before agents use signed-in profiles"),
+    to: "/settings/browser",
+    searchTerms: [msg("incognito logins cookies sessions approve permission grant agent browser")],
+  },
+  {
+    id: "agent-browser-profile-grants",
+    title: msg("Allowed profiles"),
+    to: "/settings/browser",
+    searchTerms: [msg("signed-in profiles agents approved grants revoke remove incognito")],
+  },
+  {
     id: "device-sources",
     title: msg("Device sources"),
     to: "/settings/devices",

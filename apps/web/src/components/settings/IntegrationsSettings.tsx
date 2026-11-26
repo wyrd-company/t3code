@@ -5,6 +5,7 @@ import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings"
 import { ScopedSwitch } from "./ScopedSwitch";
 import { DeviceSourcesSettings } from "./DeviceSourcesSettings";
 import {
+  type AgentBrowserProfileGrant,
   AuthSettingsWriteScope,
   BrowserImportFailureReason,
   BROWSER_PROFILE_MAX_COUNT,
@@ -29,6 +30,8 @@ import {
   PREVIEW_VIEWPORT_MAX_DIMENSION,
   PREVIEW_VIEWPORT_MIN_DIMENSION,
   PREVIEW_ZOOM_LEVELS,
+  ProjectId,
+  ThreadId,
   findBrowserProfile,
   isBuiltInBrowserProfileId,
   resolveBrowserProfiles,
@@ -49,13 +52,19 @@ import { ScreenRotationIcon } from "~/browser/ScreenRotationIcon";
 import { resolveEnvironmentOptionLabel } from "~/components/BranchToolbar.logic";
 import { previewBridge } from "~/components/preview/previewBridge";
 import { cn, randomUUID } from "~/lib/utils";
-import { useEnvironments, usePrimaryEnvironment } from "~/state/environments";
+import {
+  useEnvironmentProviders,
+  useEnvironments,
+  usePrimaryEnvironment,
+} from "~/state/environments";
 import { deviceEnvironment, useDeviceState } from "~/state/device";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { formatEnvironmentQueryError } from "~/state/query";
 import { previewEnvironment } from "~/state/preview";
-import { useServerConfigs } from "~/state/entities";
+import { useProject, useServerConfigs, useThreadShell } from "~/state/entities";
+import { serverEnvironment } from "~/state/server";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   AgentDeviceSetupStatus,
@@ -1148,6 +1157,173 @@ function AgentBrowserAccessSetting() {
   );
 }
 
+function AgentBrowserProfileApprovalSetting() {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+
+  return (
+    <SettingsRow
+      serverScoped
+      settingKeys={["requireAgentBrowserProfileApproval"]}
+      {...searchableSetting("agent-browser-profile-approval")}
+      description={gt(
+        "Agent tabs open in Incognito unless you have allowed your default profile. An agent asks before it uses a signed-in profile, and you choose whether that holds for the thread, the project or the provider.",
+      )}
+      resetAction={
+        settings.requireAgentBrowserProfileApproval !==
+        DEFAULT_SERVER_SETTINGS.requireAgentBrowserProfileApproval ? (
+          <SettingResetButton
+            ariaLabel={gt("Reset signed-in profile approval to default")}
+            onClick={() =>
+              updateSettings({
+                requireAgentBrowserProfileApproval:
+                  DEFAULT_SERVER_SETTINGS.requireAgentBrowserProfileApproval,
+              })
+            }
+          />
+        ) : null
+      }
+      control={
+        <ScopedSwitch
+          settingKeys={["requireAgentBrowserProfileApproval"]}
+          aria-label={gt("Ask before agents use signed-in profiles")}
+          checked={settings.requireAgentBrowserProfileApproval}
+          onCheckedChange={(enabled) =>
+            updateSettings({ requireAgentBrowserProfileApproval: enabled })
+          }
+        />
+      }
+    />
+  );
+}
+
+/** Every environment in scope keeps its own grants, so each row removes one from its own. */
+function AgentBrowserProfileGrantsSetting() {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
+  const { scope, targets } = useSettingsScope();
+  const profiles = useClientSettings((settings) =>
+    resolveBrowserProfiles(settings.browserProfiles),
+  );
+  // Grants are environment-wide; a project's checkouts would list each one again.
+  if (scope.kind === "project" || scope.kind === "checkout") return null;
+  const grants = targets.flatMap((target) =>
+    Object.entries(target.settings.agentBrowserProfileGrants).map(([key, grant]) => ({
+      environmentId: target.environmentId,
+      environmentLabel: target.label,
+      key,
+      grant,
+    })),
+  );
+  if (grants.length === 0) return null;
+
+  return (
+    <SettingsRow
+      {...searchableSetting("agent-browser-profile-grants")}
+      description={gt(
+        "Agents use these signed-in profiles without asking. Removing one also stops agent tabs already open in it.",
+      )}
+    >
+      <div className="mt-2 mb-2 overflow-hidden rounded-lg border border-border/60">
+        {grants.map(({ environmentId, environmentLabel, key, grant }, index) => (
+          <AgentBrowserProfileGrantRow
+            key={`${environmentId}:${key}`}
+            environmentId={environmentId}
+            environmentLabel={targets.length > 1 ? environmentLabel : null}
+            grantKey={key}
+            grant={grant}
+            profileName={previewProfileLabel(
+              profiles,
+              grant.profileId,
+              grant.profileName ?? grant.profileId,
+            )}
+            first={index === 0}
+          />
+        ))}
+      </div>
+    </SettingsRow>
+  );
+}
+
+function AgentBrowserProfileGrantRow(props: {
+  readonly environmentId: EnvironmentId;
+  readonly environmentLabel: string | null;
+  readonly grantKey: string;
+  readonly grant: AgentBrowserProfileGrant;
+  readonly profileName: string;
+  readonly first: boolean;
+}) {
+  const gt = useGT();
+  const { environmentId } = props;
+  const canRemove = useEnvironmentScope(environmentId, AuthSettingsWriteScope);
+  const updateSettings = useAtomCommand(serverEnvironment.updateSettings);
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 px-3 py-2",
+        !props.first && "border-t border-border/60",
+      )}
+    >
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-sm text-foreground">{props.profileName}</span>
+        <AgentBrowserProfileGrantScope
+          environmentId={environmentId}
+          environmentLabel={props.environmentLabel}
+          grant={props.grant}
+        />
+      </span>
+      <Button
+        size="xs"
+        variant="outline"
+        disabled={!canRemove}
+        aria-label={gt("Stop allowing {name}", { name: props.profileName })}
+        onClick={() =>
+          void updateSettings({
+            environmentId,
+            input: { patch: { agentBrowserProfileGrants: { [props.grantKey]: null } } },
+          })
+        }
+      >
+        <T>Remove</T>
+      </Button>
+    </div>
+  );
+}
+
+function AgentBrowserProfileGrantScope(props: {
+  readonly environmentId: EnvironmentId;
+  readonly environmentLabel: string | null;
+  readonly grant: AgentBrowserProfileGrant;
+}) {
+  const gt = useGT();
+  const { environmentId, grant } = props;
+  const thread = useThreadShell(
+    grant.scope === "thread" ? scopeThreadRef(environmentId, ThreadId.make(grant.scopeId)) : null,
+  );
+  const project = useProject(
+    grant.scope === "project"
+      ? scopeProjectRef(environmentId, ProjectId.make(grant.scopeId))
+      : null,
+  );
+  const provider = useEnvironmentProviders()
+    .get(environmentId)
+    ?.find((candidate) => candidate.instanceId === grant.scopeId);
+  const where =
+    grant.scope === "thread"
+      ? gt("Thread: {title}", { title: thread?.title ?? grant.scopeId })
+      : grant.scope === "project"
+        ? gt("Project: {name}", { name: project?.title ?? grant.scopeId })
+        : gt("Provider: {name}", { name: provider?.displayName ?? grant.scopeId });
+  return (
+    <span className="truncate text-xs text-muted-foreground">
+      {where}
+      {props.environmentLabel === null ? null : ` · ${props.environmentLabel}`}
+    </span>
+  );
+}
+
 function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled: boolean }) {
   const searchableSetting = useSearchableSetting();
   const gt = useGT();
@@ -1186,6 +1362,12 @@ function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled
     />
   );
 }
+
+const previewProfileLabel = (
+  profiles: ReadonlyArray<BrowserProfile>,
+  id: string,
+  missing: string,
+) => profiles.find((profile) => profile.id === id)?.name ?? missing;
 
 function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const searchableSetting = useSearchableSetting();
@@ -1702,6 +1884,8 @@ export function BrowserSettingsPanel() {
     <SettingsPageContainer>
       <SettingsSection id="browser-agent-access" title={gt("Agent access")}>
         <AgentBrowserAccessSetting />
+        <AgentBrowserProfileApprovalSetting />
+        <AgentBrowserProfileGrantsSetting />
       </SettingsSection>
       <SettingsSection id="browser" title={gt("Browsing")}>
         <SettingsUnavailableGroup message={desktopOnlyMessage}>

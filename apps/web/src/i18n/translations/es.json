@@ -13009,5 +13009,53 @@
       "v": "v"
     },
     " más en Elementos vinculados"
-  ]
+  ],
+  "6d12d51cbe8a951b": "Permitir en este hilo",
+  "c930be62cb5d1953": "Permitir en este proyecto",
+  "23d4b1ccde62bc53": "Permitir con este proveedor",
+  "3f1f3a09c2b6c179": "Permitido en este hilo",
+  "1752c6e991f256fe": "Permitido en este proyecto",
+  "640301b2022d9983": "Permitido con este proveedor",
+  "9e5e9c9432b3fa4a": "Cerrado sin respuesta",
+  "8c49e90370143fb5": [
+    "Perfil de navegador ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "526f8417faeca2a9": [
+    "¿Dejar que el agente use tu perfil del navegador ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "?"
+  ],
+  "95329f3d1d4ff201": "Quiere abrir una pestaña con tu sesión iniciada. Así podrá actuar en todos los sitios en los que este perfil tiene sesión iniciada.",
+  "84863aa02398a35f": [
+    "Quiere abrir ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " con tu sesión iniciada. Así podrá actuar en todos los sitios en los que este perfil tiene sesión iniciada."
+  ],
+  "3c4c1cc52031f91f": "Solo quien puede ejecutar agentes en esta máquina puede responder.",
+  "e30867e6282aa5ba": "Para permitirlo más allá de este hilo necesitas permiso para cambiar la configuración.",
+  "d0eb90f0a42166b7": "No permitir",
+  "e55d9ca20554efe1": "Restablecer la aprobación de perfiles con sesión iniciada",
+  "4c46030debd09138": "Preguntar antes de que los agentes usen perfiles con sesión iniciada",
+  "cf7bbe2684e614ef": "Los agentes usan estos perfiles con sesión iniciada sin preguntar. Al quitar uno, también se detienen las pestañas de agentes ya abiertas en él.",
+  "9f28638571b5e34b": "Dejar de permitir {name}",
+  "e4735c286c0ae871": "Hilo: {title}",
+  "ca986bad5a996a23": "Proyecto: {name}",
+  "9a0abf602fbbc4c4": "Proveedor: {name}",
+  "60cf308ca54ed5d2": "incógnito inicios de sesión cookies sesiones aprobar permiso conceder agente navegador",
+  "68b57dc6fff8c2a0": "Perfiles permitidos",
+  "a9710b616106a6d7": "perfiles con sesión agentes aprobados permisos revocar quitar incógnito",
+  "a4ed1aa1aa0ce837": "Las pestañas de los agentes se abren en modo incógnito, salvo que hayas permitido tu perfil predeterminado. Un agente pregunta antes de usar un perfil con sesión iniciada, y tú eliges si vale para el hilo, el proyecto o el proveedor."
 }

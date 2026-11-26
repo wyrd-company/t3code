@@ -13014,5 +13014,53 @@
       "v": "v"
     },
     " de plus dans Éléments associés"
-  ]
+  ],
+  "6d12d51cbe8a951b": "Autoriser pour ce fil",
+  "c930be62cb5d1953": "Autoriser pour ce projet",
+  "23d4b1ccde62bc53": "Autoriser pour ce fournisseur",
+  "3f1f3a09c2b6c179": "Autorisé pour ce fil",
+  "1752c6e991f256fe": "Autorisé pour ce projet",
+  "640301b2022d9983": "Autorisé pour ce fournisseur",
+  "9e5e9c9432b3fa4a": "Fermé sans réponse",
+  "8c49e90370143fb5": [
+    "Profil de navigateur ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "526f8417faeca2a9": [
+    "Laisser l'agent utiliser votre profil de navigateur ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " ?"
+  ],
+  "95329f3d1d4ff201": "Il veut ouvrir un onglet connecté en votre nom. Il pourra alors agir sur tous les sites où ce profil est connecté.",
+  "84863aa02398a35f": [
+    "Il veut ouvrir ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " connecté en votre nom. Il pourra alors agir sur tous les sites où ce profil est connecté."
+  ],
+  "3c4c1cc52031f91f": "Seule une personne autorisée à exécuter des agents sur cette machine peut y répondre.",
+  "e30867e6282aa5ba": "L'autoriser au-delà de ce fil nécessite l'autorisation de modifier les réglages.",
+  "d0eb90f0a42166b7": "Ne pas autoriser",
+  "e55d9ca20554efe1": "Réinitialiser l'approbation des profils connectés",
+  "4c46030debd09138": "Demander avant que les agents utilisent des profils connectés",
+  "cf7bbe2684e614ef": "Les agents utilisent ces profils connectés sans demander. En retirer un arrête aussi les onglets d'agents déjà ouverts dans ce profil.",
+  "9f28638571b5e34b": "Ne plus autoriser {name}",
+  "e4735c286c0ae871": "Fil : {title}",
+  "ca986bad5a996a23": "Projet : {name}",
+  "9a0abf602fbbc4c4": "Fournisseur : {name}",
+  "60cf308ca54ed5d2": "navigation privée connexions cookies sessions approuver autorisation accorder agent navigateur",
+  "68b57dc6fff8c2a0": "Profils autorisés",
+  "a9710b616106a6d7": "profils connectés agents approuvés autorisations révoquer retirer navigation privée",
+  "a4ed1aa1aa0ce837": "Les onglets des agents s'ouvrent en navigation privée, sauf si vous avez autorisé votre profil par défaut. Un agent demande avant d'utiliser un profil connecté, et vous choisissez si cela vaut pour le fil, le projet ou le fournisseur."
 }

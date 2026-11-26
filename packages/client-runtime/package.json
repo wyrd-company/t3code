@@ -111,6 +111,10 @@
       "types": "./src/feedbackRequest.ts",
       "default": "./src/feedbackRequest.ts"
     },
+    "./browser-profile-request": {
+      "types": "./src/browserProfileRequest.ts",
+      "default": "./src/browserProfileRequest.ts"
+    },
     "./link-batch": {
       "types": "./src/linkBatch.ts",
       "default": "./src/linkBatch.ts"
