@@ -3,6 +3,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Record from "effect/Record";
 import * as Schema from "effect/Schema";
 import {
+  BROWSER_PROFILE_REQUEST_UNAPPROVED_NOTE,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   PREVIEW_RECORDING_STOP_TIMEOUT_MS,
   PreviewAutomationRecordingTransferError,
@@ -10,6 +11,7 @@ import {
   PreviewAutomationRecordingArtifact,
   PreviewAutomationActInputs,
   OrchestratorMcpFailure,
+  type PreviewAutomationProfileApprovalRequiredError,
   type ToolActivityIcon,
   type ThreadId,
   type PreviewAutomationOperation,
@@ -31,6 +33,7 @@ import {
 } from "../../../attachmentStore.ts";
 import { resolveAttachmentRelativePath } from "../../../attachmentPaths.ts";
 import * as ServerConfig from "../../../config.ts";
+import * as BrowserProfileRequests from "../../../preview/BrowserProfileRequests.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
@@ -112,6 +115,38 @@ const invokeTargeted = <A extends object>(
     })),
   );
 };
+
+/** Waits for the user to approve the profile; anything but approval fails the open. */
+const askForProfile = Effect.fn("PreviewToolkit.askForProfile")(function* (
+  required: PreviewAutomationProfileApprovalRequiredError,
+  url: string | undefined,
+) {
+  const scope = yield* McpInvocationContext.requireThreadMcpCapability("preview");
+  const requests = yield* BrowserProfileRequests.BrowserProfileRequests;
+  const outcome = yield* requests
+    .request({
+      threadId: scope.thread.threadId,
+      providerInstanceId: scope.thread.providerInstanceId,
+      profileId: required.profileId,
+      profileName: required.profileName,
+      url,
+    })
+    .pipe(
+      Effect.mapError(
+        (error) =>
+          new OrchestratorMcpFailure({
+            code: error.reason === "agent_stopped" ? "parent_not_active" : "orchestration_error",
+            message: error.message,
+          }),
+      ),
+    );
+  if (outcome !== "approved") {
+    return yield* new OrchestratorMcpFailure({
+      code: "capability_denied",
+      message: BROWSER_PROFILE_REQUEST_UNAPPROVED_NOTE[outcome],
+    });
+  }
+});
 
 const decodeActInput = Record.map(PreviewAutomationActInputs, (schema) =>
   Schema.decodeUnknownEffect(schema),
@@ -199,11 +234,18 @@ const handlers = {
   // Models often pass a dev server as both `url` and `target`; the target knows the environment.
   preview_open: McpToolAccess.actsAsCaller(({ target, url, ...input }) =>
     Effect.gen(function* () {
-      const opened = yield* invokeTargeted<PreviewAutomationStatus>(
-        "open",
-        normalizePreviewOpenInput(
-          target === undefined && url !== undefined ? { ...input, url } : input,
-        ),
+      const openInput = normalizePreviewOpenInput(
+        target === undefined && url !== undefined ? { ...input, url } : input,
+      );
+      const open = invokeTargeted<PreviewAutomationStatus>("open", openInput);
+      const opened = yield* open.pipe(
+        Effect.catchTags({
+          PreviewAutomationProfileApprovalRequiredError: (required) =>
+            // With a target, `url` is not where the tab goes, so the card names no address.
+            askForProfile(required, target === undefined ? url : undefined).pipe(
+              Effect.andThen(open),
+            ),
+        }),
       );
       if (target === undefined || opened.tabId === null) return opened;
       return yield* invokeTargeted<PreviewAutomationStatus>("navigate", {

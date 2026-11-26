@@ -778,6 +778,51 @@ it.effect("answering a secret request with a reference needs provider management
   }),
 );
 
+it.effect("approving a browser profile beyond its thread needs settings write", () =>
+  Effect.gen(function* () {
+    const group = WsRpcGroup.omit(
+      ...[...WsRpcGroup.requests.keys()].filter(
+        (
+          tag,
+        ): tag is Exclude<
+          keyof typeof RPC_REQUIRED_SCOPES,
+          typeof WS_METHODS.browserProfilesAnswerRequest
+        > => tag !== WS_METHODS.browserProfilesAnswerRequest,
+      ),
+    );
+    const handled: string[] = [];
+    const handler = group.toLayerHandler(WS_METHODS.browserProfilesAnswerRequest, ({ answer }) =>
+      Effect.sync(() => {
+        handled.push(answer.type === "approve" ? answer.scope : answer.type);
+      }),
+    );
+    const clientWith = (...scopes: Parameters<typeof RpcAuthorization.layer>[0]) =>
+      RpcTest.makeClient(group).pipe(
+        Effect.provide(Layer.merge(handler, RpcAuthorization.layer(scopes))),
+      );
+    const request = { threadId: ThreadId.make("thread"), turnItemId: TurnItemId.make("item") };
+    const approve = (scope: "thread" | "project" | "providerInstance") => ({
+      ...request,
+      answer: { type: "approve" as const, scope },
+    });
+
+    const operate = yield* clientWith(AuthOrchestrationOperateScope);
+    yield* operate[WS_METHODS.browserProfilesAnswerRequest](approve("thread"));
+    yield* operate[WS_METHODS.browserProfilesAnswerRequest]({
+      ...request,
+      answer: { type: "decline" },
+    });
+    for (const scope of ["project", "providerInstance"] as const) {
+      expect(
+        yield* operate[WS_METHODS.browserProfilesAnswerRequest](approve(scope)).pipe(Effect.flip),
+      ).toMatchObject({ requiredPermission: AuthSettingsWriteScope });
+    }
+    const configure = yield* clientWith(AuthOrchestrationOperateScope, AuthSettingsWriteScope);
+    yield* configure[WS_METHODS.browserProfilesAnswerRequest](approve("project"));
+    expect(handled).toEqual(["thread", "decline", "project"]);
+  }),
+);
+
 it.effect("requires task permission before attaching a prepared worktree to a thread", () =>
   Effect.gen(function* () {
     const group = WsRpcGroup.omit(

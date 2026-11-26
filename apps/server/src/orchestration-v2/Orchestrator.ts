@@ -720,6 +720,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "secret_request.record":
     case "link_request.record":
     case "feedback_request.record":
+    case "browser_profile_request.record":
       return command.threadId;
     case "thread.fork":
     case "thread.merge_back":
@@ -11353,6 +11354,122 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     },
   );
 
+  /** Records or updates the card for a persistent browser profile an agent asked to use. */
+  const dispatchBrowserProfileRequestRecord = Effect.fn(
+    "orchestrationV2.dispatch.browserProfileRequestRecord",
+  )(function* (
+    command: Extract<
+      OrchestrationV2InternalCommand,
+      { readonly type: "browser_profile_request.record" }
+    >,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    const projection = yield* projectionStore
+      .getRunCardRecords(command.threadId, command.runId, command.nodeId, "browser_profile_request")
+      .pipe(
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+        ),
+      );
+    const fail = (cause: string) =>
+      new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause,
+      });
+    const run = projection.runs.find((candidate) => candidate.id === command.runId);
+    const existing = projection.turnItems.find((item) => item.id === command.turnItemId);
+    if (
+      existing !== undefined &&
+      (existing.type !== "browser_profile_request" || existing.runId !== command.runId)
+    ) {
+      return yield* fail(
+        `Turn item ${command.turnItemId} is not a browser profile request of run ${command.runId}.`,
+      );
+    }
+    // A decided card stays decided, so a late close cannot reopen or relabel it. Only a decline
+    // holds for the run: asking again reopens a card that closed unanswered, or an approval whose
+    // grant failed to save or was removed since.
+    const reopening =
+      (existing?.accessStatus === "approved" || existing?.accessStatus === "cancelled") &&
+      command.accessStatus === "pending";
+    if (existing !== undefined && existing.accessStatus !== "pending" && !reopening) return;
+    // Another open joining a waiting card may only take its address away, when they differ.
+    if (
+      existing?.accessStatus === "pending" &&
+      command.accessStatus === "pending" &&
+      (existing.url === undefined || command.url !== undefined)
+    )
+      return;
+    if (run === undefined) return yield* fail(`Run ${command.runId} does not exist.`);
+    const nodeId = existing?.nodeId ?? command.nodeId;
+    const ended =
+      run.status === "completed" ||
+      run.status === "failed" ||
+      run.status === "cancelled" ||
+      run.status === "interrupted" ||
+      run.status === "rolled_back";
+    // Only the attempt that asked may ask again; anything after it finds the card as it was.
+    if (reopening && (ended || run.rootNodeId !== nodeId)) return;
+    // A new card must sit on the run's current root, and so must an approval: a steer can replace
+    // the root, and its provider, and nothing may be granted to whatever runs after it. Any other
+    // answer must still close the card.
+    if (
+      (existing === undefined || command.accessStatus === "approved") &&
+      run.rootNodeId !== nodeId
+    ) {
+      return yield* fail(`Node ${nodeId} is not the root of run ${command.runId}.`);
+    }
+    // A stopped run keeps its root; nothing asked by it may be granted afterwards.
+    if (command.accessStatus === "approved" && ended) {
+      return yield* fail(`Run ${command.runId} has ended.`);
+    }
+    const now = yield* DateTime.now;
+    const pending = command.accessStatus === "pending";
+    // Only asking sets the address; an answer or a close keeps the one the user saw.
+    const url = pending || existing === undefined ? command.url : existing.url;
+    yield* emit(
+      events,
+      command,
+    )({
+      type: "turn-item.updated",
+      threadId: command.threadId,
+      runId: command.runId,
+      ...(nodeId === null ? {} : { nodeId }),
+      providerInstanceId: run.providerInstanceId,
+      occurredAt: now,
+      payload: {
+        id: command.turnItemId,
+        threadId: command.threadId,
+        runId: command.runId,
+        nodeId,
+        providerThreadId: existing?.providerThreadId ?? run.providerThreadId,
+        providerTurnId:
+          existing === undefined
+            ? (providerTurnForRun(projection, run)?.id ?? null)
+            : existing.providerTurnId,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: existing?.ordinal ?? (yield* nextTurnItemOrdinal(projection)),
+        status: pending
+          ? "waiting"
+          : command.accessStatus === "approved"
+            ? "completed"
+            : "cancelled",
+        title: command.profileName,
+        startedAt: existing?.startedAt ?? now,
+        completedAt: pending ? null : now,
+        updatedAt: now,
+        type: "browser_profile_request",
+        profileId: command.profileId,
+        profileName: command.profileName,
+        ...(url === undefined ? {} : { url }),
+        accessStatus: command.accessStatus,
+        ...(command.grantScope === undefined ? {} : { grantScope: command.grantScope }),
+      },
+    });
+  });
+
   /**
    * Records or updates the card for a link an agent asked the user to make.
    * The pairing code goes straight to the link and never through orchestration.
@@ -16479,6 +16596,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "feedback_request.record":
         yield* dispatchFeedbackRequestRecord(command, events);
         break;
+      case "browser_profile_request.record":
+        yield* dispatchBrowserProfileRequestRecord(command, events);
+        break;
       case "link_request.record":
         yield* dispatchLinkRequestRecord(command, events, effects);
         break;
@@ -16616,6 +16736,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           command.type === "subagent.stop" ||
           // Closing a share again, or after it ended, is not an error.
           command.type === "thread.guest-share.close" ||
+          // A decided card stays decided; asking again or closing it late changes nothing.
+          command.type === "browser_profile_request.record" ||
           (command.type === "thread.delete" && command.onlyIfUnused === true),
         (_planned) =>
           new OrchestratorDispatchError({

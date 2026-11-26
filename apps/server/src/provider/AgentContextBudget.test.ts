@@ -35,6 +35,7 @@ import { RemoteDelegation } from "../peer/RemoteDelegation.ts";
 import { PreviewManager } from "../preview/Manager.ts";
 import { Workflows } from "../workflows/Workflows.ts";
 import { PreviewBrowser } from "../preview/PreviewBrowser.ts";
+import { BrowserProfileRequests } from "../preview/BrowserProfileRequests.ts";
 import { ManagedProjectFolders } from "../project/ManagedProjectFolders.ts";
 import { ProjectCloneTracker } from "../project/ProjectCloneTracker.ts";
 import { ProjectService } from "../project/ProjectService.ts";
@@ -75,6 +76,7 @@ const toolHandlerServices = Layer.mergeAll(
   Layer.mock(PeerLinks)({}),
   Layer.mock(PreviewAutomationBroker)({}),
   Layer.mock(PreviewBrowser)({}),
+  Layer.mock(BrowserProfileRequests)({}),
   Layer.mock(PreviewManager)({}),
   Layer.mock(Workflows)({}),
   Layer.mock(ProjectCloneTracker)({}),

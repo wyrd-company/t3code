@@ -28,6 +28,7 @@ import { McpSchema, Tool, Toolkit } from "effect/ai";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as ServerConfig from "../../../config.ts";
+import * as BrowserProfileRequests from "../../../preview/BrowserProfileRequests.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 
 const dependencies = [
@@ -59,7 +60,7 @@ const readonlyBrowserTool = <T extends Tool.Any>(tool: T): T =>
 
 const PreviewStatusTool = Tool.make("preview_status", {
   description:
-    "Report preview tab state: owner, pending dialog, URL, title, loading, viewport, and size. `tabs` lists this thread's tabs. `profiles` lists logins for `preview_open`. Read any listed tab. Act only on your tab, or an unclaimed tab with no human in control.",
+    "Report preview tab state: owner, pending dialog, URL, title, loading, viewport, and size. `tabs` lists this thread's tabs. `profiles` lists logins for `preview_open`. Read any listed tab not marked profileApprovalRequired. Act only on your tab, or an unclaimed tab with no human in control.",
   parameters: PreviewAutomationTabTargetInput,
   success: PreviewAutomationStatus,
   failure: PreviewToolFailure,
@@ -84,7 +85,7 @@ const PreviewOpenTool = browserTool(
     ),
     success: PreviewAutomationStatus,
     failure: PreviewToolFailure,
-    dependencies,
+    dependencies: [...dependencies, BrowserProfileRequests.BrowserProfileRequests],
   })
     .annotate(Tool.Title, "Open browser preview")
     .annotate(Tool.Destructive, false),

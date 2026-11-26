@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  BROWSER_PROFILE_REQUEST_UNAPPROVED_NOTE,
   EnvironmentId,
   PreviewTabId,
   ProviderInstanceId,
@@ -24,6 +25,7 @@ import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { liveThreadsLayer } from "../../McpToolAccess.testkit.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
+import * as BrowserProfileRequests from "../../../preview/BrowserProfileRequests.ts";
 import { claimPreviewRecording, layerStandard } from "./handlers.ts";
 import { PreviewStandardToolkit } from "./tools.ts";
 
@@ -81,6 +83,126 @@ it.effect("preview_open navigates the opened tab to a dev server in one tool cal
     ]);
     expect(requests[1]?.tabId).toBe(tabId);
     expect(requests[1]?.tabIdExplicit).toBe(true);
+  }).pipe(
+    Effect.provideService(McpInvocationContext.McpInvocationContext, {
+      environmentId: EnvironmentId.make("environment-1"),
+      requestNamespace: "provider-session-1",
+      thread: {
+        threadId: ThreadId.make("thread-1"),
+        providerSessionId: "provider-session-1",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+      },
+      client: undefined,
+      capabilities: new Set(["preview"] as const),
+      issuedAt: 1,
+    }),
+    Effect.provide(
+      Layer.mergeAll(
+        PreviewAutomationBroker.layer,
+        liveThreadsLayer,
+        Layer.mock(BrowserProfileRequests.BrowserProfileRequests)({}),
+      ).pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+    ),
+  ),
+);
+
+it.effect("preview_open waits for the user to approve a profile, then opens it once", () =>
+  Effect.gen(function* () {
+    const scope = yield* McpInvocationContext.McpInvocationContext;
+    const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
+    const connected = yield* Deferred.make<void>();
+    const status = {
+      available: true,
+      visible: false,
+      tabId: PreviewTabId.make("work-tab"),
+      url: null,
+      title: null,
+      loading: false,
+    };
+    let opens = 0;
+    const events = yield* broker.connect({
+      clientId: "client-1",
+      environmentId: scope.environmentId,
+    });
+    // The host refuses the first open, as the server browser does before the grant exists.
+    yield* Stream.runForEach(events, (event) => {
+      if (event.type === "connected") return Deferred.succeed(connected, undefined);
+      opens += 1;
+      return broker.respond({
+        clientId: "client-1",
+        connectionId: event.connectionId,
+        requestId: event.request.requestId,
+        ...(opens === 1
+          ? {
+              ok: false,
+              error: {
+                _tag: "PreviewAutomationProfileApprovalRequiredError",
+                message: "Not approved.",
+                detail: { profileId: "profile-work", profileName: "Work" },
+              },
+            }
+          : { ok: true, result: status }),
+      });
+    }).pipe(Effect.forkScoped);
+    yield* Deferred.await(connected);
+    const asked: Array<unknown> = [];
+    const outcomes: Array<BrowserProfileRequests.BrowserProfileRequestOutcome> = [
+      "approved",
+      "declined",
+    ];
+    const toolkit = yield* PreviewStandardToolkit.pipe(
+      Effect.provide(McpToolAccess.HandlersLayer.layer(layerStandard)),
+    );
+    const open = toolkit
+      .handle("preview_open", { url: "https://mail.example", profileId: "Work" })
+      .pipe(
+        Stream.unwrap,
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mock(BrowserProfileRequests.BrowserProfileRequests)({
+            request: (input) => Effect.sync(() => (asked.push(input), outcomes.shift()!)),
+          }),
+        ),
+      );
+    expect((yield* open).at(-1)?.result).toEqual(status);
+    expect(asked).toEqual([
+      {
+        threadId: ThreadId.make("thread-1"),
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        profileId: "profile-work",
+        profileName: "Work",
+        url: "https://mail.example",
+      },
+    ]);
+    expect(opens).toBe(2);
+
+    opens = 0;
+    const declined = yield* Effect.flip(open);
+    expect(declined).toMatchObject({
+      code: "capability_denied",
+      message: BROWSER_PROFILE_REQUEST_UNAPPROVED_NOTE.declined,
+    });
+    expect(opens).toBe(1);
+
+    // A dev-server target is where the tab goes, so the card does not show the unused `url`.
+    opens = 0;
+    outcomes.push("approved");
+    yield* toolkit
+      .handle("preview_open", {
+        url: "https://docs.example",
+        target: { kind: "environment-port", port: 3000, path: "/admin" },
+        profileId: "Work",
+      })
+      .pipe(
+        Stream.unwrap,
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mock(BrowserProfileRequests.BrowserProfileRequests)({
+            request: (input) => Effect.sync(() => (asked.push(input), outcomes.shift()!)),
+          }),
+        ),
+      );
+    expect(asked.at(-1)).toMatchObject({ profileId: "profile-work", url: undefined });
   }).pipe(
     Effect.provideService(McpInvocationContext.McpInvocationContext, {
       environmentId: EnvironmentId.make("environment-1"),

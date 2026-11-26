@@ -48,6 +48,7 @@ import {
   TurnItemId,
 } from "./baseSchemas.ts";
 import { AuthMcpClientAccess } from "./auth.ts";
+import { AgentBrowserProfileGrantScope, BrowserProfileId } from "./browserProfile.ts";
 import { ChatAttachment } from "./chatAttachment.ts";
 import { ThreadGuestShare } from "./guestShare.ts";
 import { StoredThreadTags, ThreadTag } from "./threadTags.ts";
@@ -1907,6 +1908,29 @@ const OrchestrationV2FeedbackRequestFields = {
   feedbackStatus: AgentFeedbackRequestStatus,
 } as const;
 
+export const OrchestrationV2BrowserProfileRequestStatus = Schema.Literals([
+  "pending",
+  "approved",
+  "declined",
+  "cancelled",
+]);
+export type OrchestrationV2BrowserProfileRequestStatus =
+  typeof OrchestrationV2BrowserProfileRequestStatus.Type;
+
+/**
+ * An agent asked to open a tab in a persistent browser profile, which carries the user's
+ * sign-ins. Approving saves a grant at `grantScope`; the card keeps only what was asked.
+ */
+const OrchestrationV2BrowserProfileRequestFields = {
+  type: Schema.Literal("browser_profile_request"),
+  profileId: BrowserProfileId,
+  profileName: TrimmedNonEmptyString,
+  /** The page the agent asked to open with it. */
+  url: Schema.optional(Schema.String),
+  accessStatus: OrchestrationV2BrowserProfileRequestStatus,
+  grantScope: Schema.optional(AgentBrowserProfileGrantScope),
+} as const;
+
 export const OrchestrationV2TurnItem = Schema.Union([
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -2117,6 +2141,10 @@ export const OrchestrationV2TurnItem = Schema.Union([
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
     ...OrchestrationV2FeedbackRequestFields,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemBaseFields,
+    ...OrchestrationV2BrowserProfileRequestFields,
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -3015,6 +3043,10 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,
     ...OrchestrationV2FeedbackRequestFields,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemJsonBaseFields,
+    ...OrchestrationV2BrowserProfileRequestFields,
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,
@@ -4060,6 +4092,20 @@ const OrchestrationV2InternalCommand = Schema.Union([
     preview: AgentFeedbackPreview,
     conversationTrace: Schema.optionalKey(AgentFeedbackTrace),
     feedbackStatus: AgentFeedbackRequestStatus,
+  }),
+  /** Internal so no client can mark a request approved without its grant being saved. */
+  Schema.Struct({
+    type: Schema.Literal("browser_profile_request.record"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    runId: RunId,
+    nodeId: NodeId,
+    turnItemId: TurnItemId,
+    profileId: BrowserProfileId,
+    profileName: TrimmedNonEmptyString,
+    url: Schema.optional(Schema.String),
+    accessStatus: OrchestrationV2BrowserProfileRequestStatus,
+    grantScope: Schema.optional(AgentBrowserProfileGrantScope),
   }),
   /**
    * Records or updates a link an agent asked the user to make. Internal so no

@@ -13,6 +13,7 @@ import {
   type AuthEnvironmentScope,
   mcpClientScopes,
 } from "./auth.ts";
+import { BrowserProfileRequestAnswerInput } from "./browserProfileRequest.ts";
 import { PeerLinkLinkPairingInput } from "./peerLink.ts";
 import { ORCHESTRATION_V2_WS_METHODS } from "./orchestrationV2.ts";
 import { WS_METHODS } from "./rpc.ts";
@@ -105,12 +106,14 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.peerLinksPairLink]: AuthAccessWriteScope,
   // Send stores and sends a report from a thread's turn: the bar of running that thread.
   [WS_METHODS.agentFeedbackAnswerRequest]: AuthOrchestrationOperateScope,
+  [WS_METHODS.browserProfilesAnswerRequest]: AuthOrchestrationOperateScope,
 } as const;
 export type ClientGuardedRpcTag = keyof typeof CLIENT_GUARDED_RPC_SCOPES;
 
 const decodePrepareThread = Schema.decodeUnknownSync(GitPreparePullRequestThreadInput);
 const decodeStackedAction = Schema.decodeUnknownSync(GitRunStackedActionInput);
 const decodeLinkPairing = Schema.decodeUnknownSync(PeerLinkLinkPairingInput);
+const decodeBrowserProfileAnswer = Schema.decodeUnknownSync(BrowserProfileRequestAnswerInput);
 
 export function clientRpcRequiredScopes(
   method: string,
@@ -133,6 +136,12 @@ export function clientRpcRequiredScopes(
   if (method === WS_METHODS.peerLinksPairLink && input !== undefined) {
     const held = mcpClientScopes(decodeLinkPairing(input).access);
     return [AuthAccessWriteScope, ...held];
+  }
+  // A thread's grant ends with the thread; a wider one changes what every later thread may use.
+  if (method === WS_METHODS.browserProfilesAnswerRequest && input !== undefined) {
+    const { answer } = decodeBrowserProfileAnswer(input);
+    if (answer.type === "approve" && answer.scope !== "thread")
+      return [AuthOrchestrationOperateScope, AuthSettingsWriteScope];
   }
   if (method === WS_METHODS.guestShareCreate) {
     return [AuthAccessWriteScope, AuthOrchestrationReadScope];

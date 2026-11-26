@@ -1222,6 +1222,8 @@ function turnItemText(item: OrchestrationV2TurnItem): string | null {
       return item.linkStatus === "linked"
         ? `Linked ${item.linkedLabel ?? item.url ?? "an environment"} (${item.linkedAccess}).`
         : `Asked the user to link ${item.url ?? "an environment"}: ${item.linkStatus}.`;
+    case "browser_profile_request":
+      return `Asked the user to use the ${item.profileName} browser profile: ${item.accessStatus}${item.grantScope === undefined ? "" : ` for this ${item.grantScope === "providerInstance" ? "provider" : item.grantScope}`}.`;
     case "subagent":
       return item.result ?? item.progress ?? item.prompt;
     case "dynamic_tool":

@@ -463,6 +463,10 @@ import {
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import { AgentFeedbackAnswerInput, AgentFeedbackRequestError } from "./agentFeedback.ts";
 import {
+  BrowserProfileRequestAnswerInput,
+  BrowserProfileRequestError,
+} from "./browserProfileRequest.ts";
+import {
   ProjectCloneActionInput,
   ProjectCloneActionResult,
   ProjectCloneListEvent,
@@ -662,6 +666,7 @@ export const WS_METHODS = {
   scheduledTasksRotateWebhookToken: "scheduledTasks.rotateWebhookToken",
   secretsAnswerRequest: "secrets.answerRequest",
   agentFeedbackAnswerRequest: "agentFeedback.answerRequest",
+  browserProfilesAnswerRequest: "browserProfiles.answerRequest",
   guestShareCreate: "guestShare.create",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
@@ -2454,6 +2459,11 @@ const WsSecretsAnswerRequestRpc = Rpc.make(WS_METHODS.secretsAnswerRequest, {
   error: Schema.Union([SecretRequestError, EnvironmentAuthorizationError]),
 });
 
+const WsBrowserProfilesAnswerRequestRpc = Rpc.make(WS_METHODS.browserProfilesAnswerRequest, {
+  payload: BrowserProfileRequestAnswerInput,
+  error: Schema.Union([BrowserProfileRequestError, EnvironmentAuthorizationError]),
+});
+
 const WsAgentFeedbackAnswerRequestRpc = Rpc.make(WS_METHODS.agentFeedbackAnswerRequest, {
   payload: AgentFeedbackAnswerInput,
   error: Schema.Union([AgentFeedbackRequestError, EnvironmentAuthorizationError]),
@@ -2597,6 +2607,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsScheduledTasksRotateWebhookTokenRpc,
   WsSecretsAnswerRequestRpc,
   WsAgentFeedbackAnswerRequestRpc,
+  WsBrowserProfilesAnswerRequestRpc,
   WsScheduledTasksListWebhookDeliveriesRpc,
   WsScheduledTasksGetWebhookDeliveryRpc,
   WsServerReportClientActivityRpc,

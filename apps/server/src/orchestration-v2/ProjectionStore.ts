@@ -779,7 +779,7 @@ export interface ProjectionStoreV2Shape {
     threadId: ThreadId,
     runId: RunId,
     nodeId: NodeId,
-    cardType: "secret_request" | "link_request",
+    cardType: "secret_request" | "link_request" | "browser_profile_request",
   ) => Effect.Effect<
     ProjectionRecords<
       "runs" | "nodes" | "providerThreads" | "providerTurns" | "attempts" | "turnItems"
@@ -1840,7 +1840,12 @@ function pendingRuntimeRequestSummary(
 function secretRequestAsPendingInput(
   item: OrchestrationV2TurnItem | null,
 ): OrchestrationV2PendingRuntimeRequestSummary | null {
-  if ((item?.type !== "secret_request" && item?.type !== "link_request") || item.nodeId === null)
+  if (
+    (item?.type !== "secret_request" &&
+      item?.type !== "link_request" &&
+      item?.type !== "browser_profile_request") ||
+    item.nodeId === null
+  )
     return null;
   return {
     id: RuntimeRequestId.make(item.id),
@@ -1852,7 +1857,7 @@ function secretRequestAsPendingInput(
 }
 
 /**
- * A secret card is answered while its agent waits in the run. A link card's
+ * A secret or browser profile card is answered while its agent waits in the run. A link card's
  * agent asked without waiting, so the card waits on the user after its run,
  * until the user writes in the thread again and so has moved past it.
  */
@@ -1862,7 +1867,9 @@ const waitsOnUser = (
   latestUserAuthoredMessageAt: DateTime.Utc | null,
 ) =>
   (item.type === "link_request" && linkCardStillAsks(item, latestUserAuthoredMessageAt)) ||
-  (item.type === "secret_request" && item.runId !== null && liveRunIds.has(item.runId));
+  ((item.type === "secret_request" || item.type === "browser_profile_request") &&
+    item.runId !== null &&
+    liveRunIds.has(item.runId));
 
 const linkCardStillAsks = (
   item: OrchestrationV2TurnItem,
@@ -8594,7 +8601,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 WHERE r.thread_id = t.thread_id
                   AND r.status IN ('preparing', 'starting', 'running', 'waiting')
                   AND secret.thread_id = t.thread_id AND secret.run_id = r.run_id
-                  AND secret.type = 'secret_request' AND secret.status = 'waiting'
+                  AND secret.type IN ('secret_request', 'browser_profile_request')
+                  AND secret.status = 'waiting'
                 ORDER BY secret.updated_at DESC, secret.turn_item_id DESC
                 LIMIT 1
               ) AS pending_secret_request_payload_json,
