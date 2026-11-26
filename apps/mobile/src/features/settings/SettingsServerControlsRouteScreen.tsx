@@ -34,6 +34,7 @@ import { SourceControlProvidersSection } from "./components/SourceControlProvide
 import { SettingsProjectOverridesSection } from "./components/SettingsProjectOverridesSection";
 import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
 import { useSettingsWriter } from "./useSettingsWriter";
+import { AgentBrowserProfileGrantRows } from "./AgentBrowserProfileGrantRows";
 import {
   managedSettingReason,
   planMobileScopedSettingsClear,
@@ -406,7 +407,38 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     disabled={disabledFor("enableAgentBrowserAccess")}
                     onValueChange={(value) => write({ enableAgentBrowserAccess: value })}
                   />
+                  <View className="border-t border-border-subtle">
+                    <SettingsSwitchRow
+                      icon={{ ios: "lock", android: "lock" }}
+                      label={gt("Ask before agents use signed-in profiles")}
+                      subtitle={managedSubtitle(
+                        "requireAgentBrowserProfileApproval",
+                        projectSelected
+                          ? gt("Environment-wide setting. Select All projects to change it.")
+                          : gt(
+                              "Agent tabs open in Incognito unless you have allowed your default profile. An agent asks before it uses a signed-in profile.",
+                            ),
+                      )}
+                      value={uniform("requireAgentBrowserProfileApproval")}
+                      disabled={disabledFor("requireAgentBrowserProfileApproval")}
+                      onValueChange={(value) =>
+                        write({ requireAgentBrowserProfileApproval: value })
+                      }
+                    />
+                  </View>
                 </SettingsSection>
+                {projectSelected ||
+                !displayTargets.some(
+                  (target) => Object.keys(target.settings.agentBrowserProfileGrants).length > 0,
+                ) ? null : (
+                  <SettingsSection title={gt("Allowed profiles")}>
+                    <AgentBrowserProfileGrantRows
+                      targets={displayTargets}
+                      disabled={pendingWrites > 0 || !hasConnectedSelection}
+                      canWrite={(environmentId) => writableEnvironments.has(environmentId)}
+                    />
+                  </SettingsSection>
+                )}
                 <AutoSettleSettingsRows write={write} pending={pendingWrites > 0} />
               </>
             ) : null}

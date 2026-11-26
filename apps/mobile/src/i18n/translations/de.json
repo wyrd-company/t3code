@@ -5708,5 +5708,52 @@
   "99451a5d2d40440f": "Zurückgezogen von {by}.",
   "3ee30a50b70fffab": "Zurückgezogen von {by}: {reason}",
   "201490988858b511": "zurückgezogen von {by}",
-  "46d614fa7b4bf1e5": "Workflow-Ausführungen"
+  "46d614fa7b4bf1e5": "Workflow-Ausführungen",
+  "6d12d51cbe8a951b": "Für diesen Thread erlauben",
+  "c930be62cb5d1953": "Für dieses Projekt erlauben",
+  "23d4b1ccde62bc53": "Für diesen Anbieter erlauben",
+  "3f1f3a09c2b6c179": "Für diesen Thread erlaubt",
+  "1752c6e991f256fe": "Für dieses Projekt erlaubt",
+  "640301b2022d9983": "Für diesen Anbieter erlaubt",
+  "9e5e9c9432b3fa4a": "Ohne Antwort geschlossen",
+  "a027c49e9db12d31": "Browserprofil {profile}",
+  "e4735c286c0ae871": "Thread: {title}",
+  "ca986bad5a996a23": "Projekt: {name}",
+  "9a0abf602fbbc4c4": "Anbieter: {name}",
+  "3cda0dd3bea3a6ec": "{name} nicht mehr erlauben?",
+  "3c603b3ce16a7ddd": "Agenten fragen wieder, bevor sie dieses Profil verwenden. Bereits darin geöffnete Agenten-Tabs funktionieren nicht mehr.",
+  "4c46030debd09138": "Fragen, bevor Agenten angemeldete Profile verwenden",
+  "68b57dc6fff8c2a0": "Erlaubte Profile",
+  "a5120a92dce4546a": "Nicht erlauben",
+  "8c49e90370143fb5": [
+    "Browserprofil ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "526f8417faeca2a9": [
+    "Darf der Agent dein Browserprofil ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " verwenden?"
+  ],
+  "95329f3d1d4ff201": "Er möchte einen Tab öffnen, in dem du angemeldet bist. Dann kann er auf jeder Website handeln, bei der dieses Profil angemeldet ist.",
+  "84863aa02398a35f": [
+    "Er möchte ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " öffnen, angemeldet als du. Dann kann er auf jeder Website handeln, bei der dieses Profil angemeldet ist."
+  ],
+  "3c4c1cc52031f91f": "Nur wer auf diesem Rechner Agenten ausführen darf, kann darauf antworten.",
+  "e30867e6282aa5ba": "Um es über diesen Thread hinaus zu erlauben, brauchst du die Berechtigung, Einstellungen zu ändern.",
+  "3ec728951b388912": "Agenten-Tabs öffnen sich im Inkognito-Modus, sofern du dein Standardprofil nicht erlaubt hast. Ein Agent fragt, bevor er ein angemeldetes Profil verwendet.",
+  "910a79263d640e22": "Erlaubt"
 }

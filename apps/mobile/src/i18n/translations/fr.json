@@ -5702,5 +5702,52 @@
   "99451a5d2d40440f": "Retirée par {by}.",
   "3ee30a50b70fffab": "Retirée par {by} : {reason}",
   "201490988858b511": "retirée par {by}",
-  "46d614fa7b4bf1e5": "Exécutions de workflow"
+  "46d614fa7b4bf1e5": "Exécutions de workflow",
+  "6d12d51cbe8a951b": "Autoriser pour ce fil",
+  "c930be62cb5d1953": "Autoriser pour ce projet",
+  "23d4b1ccde62bc53": "Autoriser pour ce fournisseur",
+  "3f1f3a09c2b6c179": "Autorisé pour ce fil",
+  "1752c6e991f256fe": "Autorisé pour ce projet",
+  "640301b2022d9983": "Autorisé pour ce fournisseur",
+  "9e5e9c9432b3fa4a": "Fermé sans réponse",
+  "a027c49e9db12d31": "Profil de navigateur {profile}",
+  "e4735c286c0ae871": "Fil : {title}",
+  "ca986bad5a996a23": "Projet : {name}",
+  "9a0abf602fbbc4c4": "Fournisseur : {name}",
+  "3cda0dd3bea3a6ec": "Ne plus autoriser {name} ?",
+  "3c603b3ce16a7ddd": "Les agents redemanderont avant d'utiliser ce profil. Les onglets d'agents déjà ouverts dans ce profil cessent de fonctionner.",
+  "4c46030debd09138": "Demander avant que les agents utilisent des profils connectés",
+  "68b57dc6fff8c2a0": "Profils autorisés",
+  "a5120a92dce4546a": "Ne pas autoriser",
+  "8c49e90370143fb5": [
+    "Profil de navigateur ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "526f8417faeca2a9": [
+    "Laisser l'agent utiliser votre profil de navigateur ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " ?"
+  ],
+  "95329f3d1d4ff201": "Il veut ouvrir un onglet connecté en votre nom. Il pourra alors agir sur tous les sites où ce profil est connecté.",
+  "84863aa02398a35f": [
+    "Il veut ouvrir ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " connecté en votre nom. Il pourra alors agir sur tous les sites où ce profil est connecté."
+  ],
+  "3c4c1cc52031f91f": "Seule une personne autorisée à exécuter des agents sur cette machine peut y répondre.",
+  "e30867e6282aa5ba": "L'autoriser au-delà de ce fil nécessite l'autorisation de modifier les réglages.",
+  "3ec728951b388912": "Les onglets des agents s'ouvrent en navigation privée, sauf si vous avez autorisé votre profil par défaut. Un agent demande avant d'utiliser un profil connecté.",
+  "910a79263d640e22": "Autorisé"
 }

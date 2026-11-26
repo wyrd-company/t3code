@@ -5708,5 +5708,52 @@
   "99451a5d2d40440f": "Återkallad av {by}.",
   "3ee30a50b70fffab": "Återkallad av {by}: {reason}",
   "201490988858b511": "återkallad av {by}",
-  "46d614fa7b4bf1e5": "Arbetsflödeskörningar"
+  "46d614fa7b4bf1e5": "Arbetsflödeskörningar",
+  "6d12d51cbe8a951b": "Tillåt för den här tråden",
+  "c930be62cb5d1953": "Tillåt för det här projektet",
+  "23d4b1ccde62bc53": "Tillåt för den här leverantören",
+  "3f1f3a09c2b6c179": "Tillåten för den här tråden",
+  "1752c6e991f256fe": "Tillåten för det här projektet",
+  "640301b2022d9983": "Tillåten för den här leverantören",
+  "9e5e9c9432b3fa4a": "Stängd utan svar",
+  "a027c49e9db12d31": "Webbläsarprofilen {profile}",
+  "e4735c286c0ae871": "Tråd: {title}",
+  "ca986bad5a996a23": "Projekt: {name}",
+  "9a0abf602fbbc4c4": "Leverantör: {name}",
+  "3cda0dd3bea3a6ec": "Sluta tillåta {name}?",
+  "3c603b3ce16a7ddd": "Agenter frågar igen innan de använder den här profilen. Agentflikar som redan är öppna i den slutar fungera.",
+  "4c46030debd09138": "Fråga innan agenter använder inloggade profiler",
+  "68b57dc6fff8c2a0": "Tillåtna profiler",
+  "a5120a92dce4546a": "Tillåt inte",
+  "8c49e90370143fb5": [
+    "Webbläsarprofilen ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "526f8417faeca2a9": [
+    "Låta agenten använda din webbläsarprofil ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "?"
+  ],
+  "95329f3d1d4ff201": "Den vill öppna en flik där du är inloggad. Då kan den agera på alla webbplatser som den här profilen är inloggad på.",
+  "84863aa02398a35f": [
+    "Den vill öppna ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " inloggad som du. Då kan den agera på alla webbplatser som den här profilen är inloggad på."
+  ],
+  "3c4c1cc52031f91f": "Bara den som kan köra agenter på den här datorn kan svara.",
+  "e30867e6282aa5ba": "För att tillåta den utanför den här tråden krävs behörighet att ändra inställningar.",
+  "3ec728951b388912": "Agentflikar öppnas i inkognitoläge om du inte har tillåtit din standardprofil. En agent frågar innan den använder en inloggad profil.",
+  "910a79263d640e22": "Tillåten"
 }

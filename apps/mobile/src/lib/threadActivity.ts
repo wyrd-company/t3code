@@ -459,6 +459,13 @@ export function isFeedbackRequestActivityGroup(entry: ThreadFeedActivityGroup): 
   );
 }
 
+export function isBrowserProfileRequestActivityGroup(entry: ThreadFeedActivityGroup): boolean {
+  return (
+    entry.activities.length === 1 &&
+    entry.activities[0]?.projectedItem.item.type === "browser_profile_request"
+  );
+}
+
 export function isLinkRequestActivityGroup(entry: ThreadFeedActivityGroup): boolean {
   return (
     entry.activities.length === 1 && entry.activities[0]?.projectedItem.item.type === "link_request"
@@ -508,7 +515,8 @@ function itemIsProminent(item: OrchestrationV2TurnItem): boolean {
     item.type === "proposed_plan" ||
     item.type === "secret_request" ||
     item.type === "feedback_request" ||
-    item.type === "link_request"
+    item.type === "link_request" ||
+    item.type === "browser_profile_request"
   );
 }
 
@@ -634,6 +642,8 @@ function itemIcon(item: OrchestrationV2TurnItem): ThreadFeedActivity["icon"] {
       return "message";
     case "link_request":
       return "globe";
+    case "browser_profile_request":
+      return "lock";
   }
 }
 
@@ -710,6 +720,8 @@ function itemSummary(
       return resolve(msg("Feedback for the T3 team"));
     case "link_request":
       return resolve(msg("Link {target}", { target: linkRequestTargetName(item, resolve) }));
+    case "browser_profile_request":
+      return resolve(msg("{profile} browser profile", { profile: item.profileName }));
     case "dynamic_tool": {
       const classified = classifyToolActivity({
         itemType: "dynamic_tool_call",
@@ -780,6 +792,8 @@ function itemPreview(item: OrchestrationV2TurnItem, resolve: MessageResolver): s
       return item.reason || null;
     case "feedback_request":
       return item.preview.subject;
+    case "browser_profile_request":
+      return item.url ?? null;
     case "subagent":
       return item.result ?? item.progress ?? item.prompt;
     case "dynamic_tool":
