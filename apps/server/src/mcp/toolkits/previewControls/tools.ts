@@ -10,6 +10,7 @@ import * as Schema from "effect/Schema";
 import { McpSchema, Tool, Toolkit } from "effect/ai";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as PreviewManager from "../../../preview/Manager.ts";
+import * as ServerSettings from "../../../serverSettings.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
@@ -21,6 +22,7 @@ const shared = {
     ThreadManagementService.ThreadManagementService,
     PreviewManager.PreviewManager,
     PreviewAutomationBroker.PreviewAutomationBroker,
+    ServerSettings.ServerSettingsService,
   ],
 };
 const PreviewListTool = Tool.make("t3_preview_list", {

@@ -10,6 +10,7 @@ import {
   FILL_PREVIEW_VIEWPORT,
   findBrowserProfile,
   INCOGNITO_BROWSER_PROFILE_ID,
+  previewProfileApprovalRequiredMessage,
   isBuiltInBrowserProfileId,
   resolveBrowserProfiles,
   type PreviewReportProfilesInput,
@@ -87,6 +88,9 @@ import { PENDING_ATTACHMENT_THREAD_SEGMENT } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import { resolveRootCliCommand } from "../cli/invocation.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as ProjectionStoreV2 from "../orchestration-v2/ProjectionStore.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import { agentProfilePolicy } from "./agentProfileAccess.ts";
 import * as PreviewAutomationBroker from "../mcp/PreviewAutomationBroker.ts";
 import * as DesktopBrowserChannel from "./DesktopBrowserChannel.ts";
 import * as PreviewAgentActivity from "./PreviewAgentActivity.ts";
@@ -690,6 +694,8 @@ const make = Effect.gen(function* () {
   const manager = yield* PreviewManager.PreviewManager;
   const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
   const environment = yield* ServerEnvironment.ServerEnvironment;
+  const projections = yield* ProjectionStoreV2.ProjectionStoreV2;
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
   const previewBrowser = yield* PreviewBrowser.PreviewBrowser;
   const desktopChannel = yield* DesktopBrowserChannel.DesktopBrowserChannel;
   const agentTurns = yield* (yield* PreviewAgentActivity.PreviewAgentActivity).changes;
@@ -1849,7 +1855,17 @@ const make = Effect.gen(function* () {
         threadId: opener.threadId,
         ...(/^https?:/i.test(url) ? { url } : {}),
         runtime: "server",
-        ...(opener.profileId === undefined ? {} : { profileId: opener.profileId }),
+        // Adopted here, it never reaches a desktop; publishing that keeps one from drawing it.
+        ...(opener.desktop === null ? { headless: true } : {}),
+        // A popup shares its opener's context, so an isolated opener's popup is Incognito too, and
+        // one of a server tab in the default names it, so no listing takes it for an agent's own.
+        ...(opener.isolatedContext
+          ? { profileId: INCOGNITO_BROWSER_PROFILE_ID }
+          : opener.profileId !== undefined
+            ? { profileId: opener.profileId }
+            : opener.desktop === null
+              ? { profileId: DEFAULT_BROWSER_PROFILE_ID }
+              : {}),
         colorScheme: opener.colorScheme,
         ...(opener.control.agentId === null
           ? {}
@@ -2161,7 +2177,7 @@ const make = Effect.gen(function* () {
     ),
   );
 
-  const profileStatus = () => {
+  const profileStatus = (defaultProfileId: string | undefined) => {
     const profiles = reportedProfiles?.profiles ?? BUILT_IN_BROWSER_PROFILES;
     return {
       profiles: profiles.map((profile) => ({
@@ -2169,7 +2185,7 @@ const make = Effect.gen(function* () {
         name: profile.name,
         ...(profile.kind === "incognito" ? { incognito: true } : {}),
       })),
-      ...(reportedProfiles ? { defaultProfileId: reportedProfiles.defaultProfileId } : {}),
+      ...(defaultProfileId === undefined ? {} : { defaultProfileId }),
     };
   };
 
@@ -2187,6 +2203,103 @@ const make = Effect.gen(function* () {
         .map((profile) => `${profile.name} (id ${profile.id})`)
         .join(", ")}.`,
     });
+  };
+
+  /** Who asks; the broker fills in the provider from the caller's authenticated scope. */
+  type AgentCaller = Pick<PreviewAutomationRequest, "threadId" | "providerInstanceId">;
+
+  // Unset while approval is off. An unreadable setting or thread denies every persistent profile.
+  const agentProfileGrants = async (caller: AgentCaller) => {
+    const settings = await runPromise(
+      serverSettings.getSettings.pipe(Effect.orElseSucceed(() => null)),
+    );
+    if (settings?.requireAgentBrowserProfileApproval === false) return undefined;
+    const thread = await runPromise(
+      projections.getThreadShell(caller.threadId).pipe(Effect.orElseSucceed(() => null)),
+    );
+    return agentProfilePolicy(settings, thread, caller);
+  };
+
+  const profileApprovalRequired = (profileId: string) => {
+    const profile = findBrowserProfile(
+      reportedProfiles?.profiles ?? BUILT_IN_BROWSER_PROFILES,
+      profileId,
+    );
+    const profileName = profile?.name ?? profileId;
+    return new ServerBrowserPage.ServerBrowserOperationError({
+      tag: "PreviewAutomationProfileApprovalRequiredError",
+      message: previewProfileApprovalRequiredMessage(profileId, profileName),
+      detail: { profileId, profileName },
+    });
+  };
+
+  /** A tab named no profile only when agents may use any, so Incognito stands in for it. */
+  const resolveAgentOpenProfile = async (
+    requested: string | undefined,
+    caller: AgentCaller,
+  ): Promise<string | undefined> => {
+    const mayUse = await agentProfileGrants(caller);
+    if (mayUse === undefined) return resolveOpenProfile(requested);
+    const profileId = agentProfileCandidate(requested);
+    if (mayUse(profileId)) return profileId;
+    // Only a profile the agent named is worth asking about; a default it never chose is not.
+    if (requested === undefined) return INCOGNITO_BROWSER_PROFILE_ID;
+    throw profileApprovalRequired(profileId);
+  };
+
+  /** The profile an agent's open would use; with no catalog reported, the built-in Default. */
+  const agentProfileCandidate = (requested: string | undefined) =>
+    resolveOpenProfile(requested) ?? DEFAULT_BROWSER_PROFILE_ID;
+
+  /** The profile a tab naming none would open in, which is what agents are told is the default. */
+  const agentDefaultProfileId = async (caller: AgentCaller) => {
+    const mayUse = await agentProfileGrants(caller);
+    if (mayUse === undefined) return reportedProfiles?.defaultProfileId;
+    const profileId = agentProfileCandidate(undefined);
+    return mayUse(profileId) ? profileId : INCOGNITO_BROWSER_PROFILE_ID;
+  };
+
+  /** The profile a tab shows; a context of its own is Incognito whatever it was named. */
+  const tabProfileId = (tab: ServerTab): string | undefined =>
+    tab.isolatedContext ? INCOGNITO_BROWSER_PROFILE_ID : tab.profileId;
+
+  /**
+   * The profile whose storage a tab really uses, or null when no grant can cover it. A desktop
+   * draws a tab naming no profile in its own default, which the server cannot name, and keeps
+   * one Incognito session that the user's own Incognito tabs share.
+   */
+  const tabStorageProfileId = (tab: ServerTab): string | null => {
+    if (tab.isolatedContext) return INCOGNITO_BROWSER_PROFILE_ID;
+    if (tab.desktop === null) return tab.profileId ?? DEFAULT_BROWSER_PROFILE_ID;
+    return tab.profileId === undefined || tab.profileId === INCOGNITO_BROWSER_PROFILE_ID
+      ? null
+      : tab.profileId;
+  };
+
+  /** False for a tab whose signed-in data the caller may not read or drive. */
+  const agentTabAccess = async (caller: AgentCaller) => {
+    const mayUse = await agentProfileGrants(caller);
+    return (tab: ServerTab) => {
+      if (mayUse === undefined) return true;
+      const profileId = tabStorageProfileId(tab);
+      return profileId !== null && mayUse(profileId);
+    };
+  };
+
+  /** Checked as each agent action starts, so removing a grant stops the tabs it opened. */
+  const assertAgentProfileAccess = async (tab: ServerTab, caller: AgentCaller) => {
+    if ((await agentTabAccess(caller))(tab)) return;
+    refuseAgentTab(tab);
+  };
+
+  const refuseAgentTab = (tab: ServerTab): never => {
+    const profileId = tabStorageProfileId(tab);
+    if (profileId === null)
+      throw new BrowserControlInterrupted({
+        message:
+          'This tab uses a desktop browser session that no approval can cover. Open your own tab with preview_open, profileId "incognito" and reuseExistingTab=false.',
+      });
+    throw profileApprovalRequired(profileId);
   };
 
   const loadErrorOf = (tab: ServerTab): PreviewAutomationLoadError | undefined => {
@@ -2228,9 +2341,11 @@ const make = Effect.gen(function* () {
   };
 
   const statusWithTitle = async (
+    caller: AgentCaller,
     tab: ServerTab | undefined,
     agentSessionId?: string,
   ): Promise<PreviewAutomationStatus> => {
+    const profileInfo = profileStatus(await agentDefaultProfileId(caller));
     if (!tab) {
       return {
         available: false,
@@ -2239,12 +2354,15 @@ const make = Effect.gen(function* () {
         url: null,
         title: null,
         loading: false,
-        ...profileStatus(),
+        ...profileInfo,
       };
     }
+    // A tab in a profile the caller may not use shows only what asking for access needs.
+    const readable = await agentTabAccess(caller);
+    const locked = !readable(tab);
     const url = ServerBrowserPage.withoutDataPayload(tab.page.url());
-    const loadError = loadErrorOf(tab);
-    const statusUrl = loadError?.url ?? (url === "about:blank" ? null : url);
+    const loadError = locked ? undefined : loadErrorOf(tab);
+    const statusUrl = locked ? null : (loadError?.url ?? (url === "about:blank" ? null : url));
     const [viewport, title] = await Promise.all([
       // A late measurement still lands in desktopViewport for the next status.
       tab.desktop
@@ -2270,10 +2388,12 @@ const make = Effect.gen(function* () {
         ownedByCaller: tab.control.agentId === agentSessionId,
         generation: tab.control.generation,
       },
-      dialog: dialogStatus(tab),
-      fileChooser: tab.fileChooser
-        ? { multiple: tab.fileChooser.chooser.isMultiple(), accept: tab.fileChooser.accept }
-        : null,
+      ...(locked ? { profileApprovalRequired: true } : {}),
+      dialog: locked ? null : dialogStatus(tab),
+      fileChooser:
+        !locked && tab.fileChooser
+          ? { multiple: tab.fileChooser.chooser.isMultiple(), accept: tab.fileChooser.accept }
+          : null,
       viewportSetting: tab.setting,
       ...(viewport ? { viewport } : {}),
       tabs: [...tabs.values()]
@@ -2281,24 +2401,27 @@ const make = Effect.gen(function* () {
         .map((candidate) => ({
           tabId: candidate.tabId,
           url:
-            candidate.page.url() === "about:blank"
+            candidate.page.url() === "about:blank" || !readable(candidate)
               ? null
               : (loadErrorOf(candidate)?.url ??
                 ServerBrowserPage.withoutDataPayload(candidate.page.url())),
+          ...(readable(candidate) ? {} : { profileApprovalRequired: true }),
           ...(candidate.openerTabId === undefined ? {} : { openerTabId: candidate.openerTabId }),
           owner: tabOwner(candidate),
           ownedByCaller: candidate.control.agentId === agentSessionId,
           visible: isVisible(candidate),
-          ...(candidate.profileId === undefined ? {} : { profileId: candidate.profileId }),
+          ...(tabProfileId(candidate) === undefined ? {} : { profileId: tabProfileId(candidate)! }),
         })),
-      ...profileStatus(),
-      downloads: tab.downloads.map(({ fileName, path, sizeBytes, url, completedAt }) => ({
-        fileName,
-        path,
-        sizeBytes,
-        url,
-        completedAt,
-      })),
+      ...profileInfo,
+      downloads: (locked ? [] : tab.downloads).map(
+        ({ fileName, path, sizeBytes, url, completedAt }) => ({
+          fileName,
+          path,
+          sizeBytes,
+          url,
+          completedAt,
+        }),
+      ),
     };
   };
 
@@ -2461,6 +2584,20 @@ const make = Effect.gen(function* () {
             ? recording.session.send("Page.startScreencast", RECORDING_SCREENCAST).catch(constVoid)
             : undefined,
         ]);
+      }
+    });
+
+  const discardRecording = (tab: ServerTab) =>
+    withCaptureLock(tab, async () => {
+      const recording = tab.recording;
+      if (!recording) return;
+      try {
+        await recording.session.send("Page.stopScreencast").catch(constVoid);
+        await Promise.all(recording.framesInFlight);
+        await recording.session.detach().catch(constVoid);
+      } finally {
+        await recording.encoder.close().catch(constVoid);
+        tab.recording = null;
       }
     });
 
@@ -2676,6 +2813,7 @@ const make = Effect.gen(function* () {
     switch (request.operation) {
       case "status":
         return statusWithTitle(
+          request,
           request.tabId === undefined
             ? latestThreadTab(request.threadId, request.agentSessionId)
             : tabs.get(tabKey(request.threadId, request.tabId)),
@@ -2732,7 +2870,9 @@ const make = Effect.gen(function* () {
             ? found
             : undefined;
         const navigationTimeout = Math.min(request.timeoutMs, NAVIGATION_TIMEOUT_MS);
-        const profileId = existing ? undefined : resolveOpenProfile(open.profileId);
+        const profileId = existing
+          ? undefined
+          : await resolveAgentOpenProfile(open.profileId, request);
         if (!existing) closeIdleAgentTabs();
         const tab =
           existing ??
@@ -2742,6 +2882,12 @@ const make = Effect.gen(function* () {
                 threadId: request.threadId,
                 ...(url ? { url } : {}),
                 ...(profileId === undefined ? {} : { profileId }),
+                // A desktop keeps one Incognito session, which the user's own Incognito tabs
+                // share, so an agent's Incognito tab stays here in a context of its own.
+                ...(profileId === INCOGNITO_BROWSER_PROFILE_ID &&
+                (await agentProfileGrants(request)) !== undefined
+                  ? { headless: true }
+                  : {}),
                 runtime: "server",
                 reveal: false,
                 automationOwner: request.agentSessionId,
@@ -2749,6 +2895,9 @@ const make = Effect.gen(function* () {
               { reclaimIdleSlot: true },
             ),
           ));
+        // Before anything else answers about the tab, so a locked tab's state stays withheld and
+        // the agent can ask for its profile even while the user or another agent drives it.
+        if (existing) await assertAgentProfileAccess(existing, request);
         if (existing?.dialog)
           throw new BrowserControlInterrupted({
             message:
@@ -2758,6 +2907,7 @@ const make = Effect.gen(function* () {
         return tab.control.agent(
           request.agentSessionId,
           async () => {
+            if (existing) await assertAgentProfileAccess(existing, request);
             if (tab.dialog)
               throw new BrowserControlInterrupted({
                 message:
@@ -2811,7 +2961,7 @@ const make = Effect.gen(function* () {
                 ).then(constVoid);
             }
             await shown;
-            return statusWithTitle(tab, request.agentSessionId);
+            return statusWithTitle(request, tab, request.agentSessionId);
           },
           deadlineMs,
         );
@@ -2849,7 +2999,19 @@ const make = Effect.gen(function* () {
         }
         // A stop cannot act twice (a retry finds no recording);
         // dropping a late one would leave capture running.
-        return tab.control.agent(request.agentSessionId ?? "", () => stopRecording(tab));
+        return tab.control.agent(request.agentSessionId ?? "", async () => {
+          // Capture stops either way; a page no longer allowed is neither captured again nor kept.
+          if (!(await agentTabAccess(request))(tab)) {
+            await discardRecording(tab);
+            refuseAgentTab(tab);
+          }
+          const recording = await stopRecording(tab);
+          if (!(await agentTabAccess(request))(tab)) {
+            await NodeFSP.rm(recording.path, { force: true });
+            refuseAgentTab(tab);
+          }
+          return recording;
+        });
       }
     }
     const tab = await requireTab(request);
@@ -2876,8 +3038,9 @@ const make = Effect.gen(function* () {
           message: "A human controls this tab.",
           reason: "humanControl",
         });
+      await assertAgentProfileAccess(tab, request);
       await resolveDialog(tab, input as PreviewAutomationDialogInput);
-      return statusWithTitle(tab, request.agentSessionId);
+      return statusWithTitle(request, tab, request.agentSessionId);
     }
     const agentSessionId = request.agentSessionId!;
 
@@ -2887,6 +3050,8 @@ const make = Effect.gen(function* () {
       !tab.control.agentCanActNow(agentSessionId)
     ) {
       return tab.control.observe(async () => {
+        // Reads too: a signed-in page is what approval protects.
+        await assertAgentProfileAccess(tab, request);
         if (tab.dialog)
           throw new BrowserControlInterrupted({
             message: "A browser dialog is pending. Read preview_status.",
@@ -2898,6 +3063,8 @@ const make = Effect.gen(function* () {
     return tab.control.agent(
       agentSessionId,
       async () => {
+        // In the queue, so an action that waited behind another sees a grant removed meanwhile.
+        await assertAgentProfileAccess(tab, request);
         if (tab.dialog)
           throw new BrowserControlInterrupted({
             message:
@@ -2936,7 +3103,7 @@ const make = Effect.gen(function* () {
             navigateInput.timeoutMs ?? request.timeoutMs,
           ),
         );
-        return statusWithTitle(tab, request.agentSessionId);
+        return statusWithTitle(request, tab, request.agentSessionId);
       }
       case "resize": {
         const setting = resolvePreviewViewport(input as PreviewAutomationResizeInput);

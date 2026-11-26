@@ -17,7 +17,13 @@ const BoundedUrl = Schema.String.check(Schema.isTrimmed())
   .check(Schema.isMaxLength(2048));
 const URL_GUIDANCE = "Absolute http(s) URL, or a bare host (https; http for loopback).";
 const PROFILE_GUIDANCE =
-  "Profile id or name from preview_status, for a new tab. Default: the user's. A tab keeps its profile.";
+  "Profile id or name from preview_status, for a new tab. Default: its defaultProfileId. A signed-in profile may ask the user first. A tab keeps its profile.";
+const PROFILE_APPROVAL_REQUIRED_DESCRIPTION =
+  "Page withheld: profile not allowed. preview_open with this tabId asks.";
+
+/** What an agent reads when it may not use a profile, and how it asks. */
+export const previewProfileApprovalRequiredMessage = (profileId: string, profileName: string) =>
+  `The user has not allowed you to use the ${profileName} browser profile here. To ask them, call preview_open with profileId "${profileId}" and reuseExistingTab=false, or with this tab's tabId. For Incognito, call preview_open with profileId "incognito" and reuseExistingTab=false.`;
 const OptionalTimeoutMs = Schema.optional(
   Schema.Int.check(Schema.isGreaterThan(0)).check(Schema.isLessThanOrEqualTo(60_000)),
 ).annotate({ description: "Default 15000." });
@@ -106,6 +112,9 @@ export const PreviewAutomationStatus = Schema.Struct({
       }),
     ),
   ),
+  profileApprovalRequired: Schema.optional(
+    Schema.Boolean.annotate({ description: PROFILE_APPROVAL_REQUIRED_DESCRIPTION }),
+  ),
   viewportSetting: Schema.optional(PreviewViewportSetting),
   viewport: Schema.optional(PreviewRenderedViewportSize),
   fileChooser: Schema.optional(
@@ -133,6 +142,9 @@ export const PreviewAutomationStatus = Schema.Struct({
         ownedByCaller: Schema.optional(Schema.Boolean),
         visible: Schema.optional(Schema.Boolean.annotate({ description: VISIBLE_DESCRIPTION })),
         profileId: Schema.optional(BrowserProfileId),
+        profileApprovalRequired: Schema.optional(
+          Schema.Boolean.annotate({ description: PROFILE_APPROVAL_REQUIRED_DESCRIPTION }),
+        ),
       }),
     ),
   ),
@@ -629,6 +641,8 @@ export const PreviewAutomationRequest = Schema.Struct({
   tabIdExplicit: Schema.optional(Schema.Boolean),
   /** Supplied by the broker from authenticated scope, never from tool input. */
   agentSessionId: Schema.optional(Schema.String),
+  /** The caller's provider instance, supplied by the broker like `agentSessionId`. */
+  providerInstanceId: Schema.optional(ProviderInstanceId),
   operation: PreviewAutomationOperation,
   input: Schema.Unknown,
   timeoutMs: Schema.Int.check(Schema.isGreaterThan(0)),
@@ -862,6 +876,21 @@ export class PreviewAutomationExecutionError extends Schema.TaggedError<PreviewA
   }
 }
 
+/** The tab's or the requested persistent profile is one the user has not allowed this agent. */
+export class PreviewAutomationProfileApprovalRequiredError extends Schema.TaggedError<PreviewAutomationProfileApprovalRequiredError>()(
+  "PreviewAutomationProfileApprovalRequiredError",
+  {
+    ...PreviewAutomationRequestErrorFields,
+    ...PreviewAutomationRemoteDiagnosticFields,
+    profileId: BrowserProfileId,
+    profileName: Schema.String,
+  },
+) {
+  override get message(): string {
+    return previewProfileApprovalRequiredMessage(this.profileId, this.profileName);
+  }
+}
+
 export class PreviewAutomationInvalidSelectorError extends Schema.TaggedError<PreviewAutomationInvalidSelectorError>()(
   "PreviewAutomationInvalidSelectorError",
   {
@@ -1013,6 +1042,7 @@ export const PreviewAutomationError = Schema.Union([
   PreviewAutomationTimeoutError,
   PreviewAutomationControlInterruptedError,
   PreviewAutomationExecutionError,
+  PreviewAutomationProfileApprovalRequiredError,
   PreviewAutomationInvalidSelectorError,
   PreviewAutomationTargetNotEditableError,
   PreviewAutomationResultTooLargeError,

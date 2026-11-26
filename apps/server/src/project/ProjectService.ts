@@ -796,11 +796,16 @@ export const make = Effect.gen(function* () {
   // Best-effort cleanup releases disabled instances kept alive by overrides; crashes have no replay to revisit deletion.
   const clearProjectSettingsOverrides = (projectId: ProjectId) =>
     serverSettings.getSettings.pipe(
-      Effect.flatMap(({ projectSettingsOverrides }) =>
+      Effect.flatMap(({ projectSettingsOverrides, agentBrowserProfileGrants }) =>
         serverSettings.updateSettings({
           projectSettingsOverrides: {
             [projectId]: deletedProjectOverridePatch(projectSettingsOverrides[projectId]),
           },
+          agentBrowserProfileGrants: Object.fromEntries(
+            Object.entries(agentBrowserProfileGrants)
+              .filter(([, grant]) => grant.scope === "project" && grant.scopeId === projectId)
+              .map(([key]) => [key, null]),
+          ),
         }),
       ),
       Effect.asVoid,

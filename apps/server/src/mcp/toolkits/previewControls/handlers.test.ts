@@ -19,6 +19,7 @@ import * as ServerSettings from "../../../serverSettings.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as McpToolAccessTestkit from "../../McpToolAccess.testkit.ts";
+import { liveThreadShell } from "../../McpToolAccess.testkit.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as PreviewControlsHandlers from "./handlers.ts";
 import { PreviewControlsToolkit } from "./tools.ts";
@@ -99,5 +100,73 @@ it.effect.each([
       }
       expect((yield* manager.list({ threadId })).sessions).toEqual([tab]);
     }
+  }),
+);
+
+it.effect("the tab list withholds the page of a tab in a profile the caller may not use", () =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make("preview-controls-profile-thread");
+    const scope: McpInvocationContext.McpInvocationScope = {
+      environmentId: EnvironmentId.make("preview-controls-environment"),
+      requestNamespace: "preview-controls-provider-session",
+      thread: {
+        threadId,
+        providerSessionId: "preview-controls-provider-session",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+      },
+      client: undefined,
+      capabilities: new Set(["preview"] as const),
+      issuedAt: 0,
+    };
+    const manager = yield* Preview.make.pipe(
+      Effect.provide(
+        Layer.merge(
+          ServerConfig.layerTest(process.cwd(), { prefix: "t3-preview-controls-" }).pipe(
+            Layer.provide(NodeServices.layer),
+          ),
+          NodeCrypto.layer,
+        ),
+      ),
+    );
+    const open = (profileId: string) =>
+      manager.open({ threadId, url: "https://mail.example/inbox", runtime: "server", profileId });
+    const work = yield* open("profile-work");
+    const client = yield* open("profile-client");
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      requireAgentBrowserProfileApproval: true,
+      agentBrowserProfileGrants: {
+        client: {
+          profileId: "profile-client",
+          scope: "project" as const,
+          scopeId: liveThreadShell(threadId).projectId,
+        },
+      },
+    };
+    const layerDependencies = Layer.mergeAll(
+      PreviewAutomationBroker.layer.pipe(
+        Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+      ),
+      Layer.succeed(Preview.PreviewManager, manager),
+      Layer.succeed(McpInvocationContext.McpInvocationContext, scope),
+      McpToolAccessTestkit.liveThreadsLayer,
+      Layer.mock(ServerSettings.ServerSettingsService)({ getSettings: Effect.succeed(settings) }),
+    );
+    const toolkit = yield* PreviewControlsToolkit.pipe(
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(PreviewControlsHandlers.layer).pipe(
+          Layer.provide(layerDependencies),
+        ),
+      ),
+    );
+    const listed = yield* toolkit
+      .handle("t3_preview_list", {})
+      .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(layerDependencies));
+    expect(listed.at(-1)?.result).toMatchObject({
+      sessions: [
+        { tabId: work.tabId, profileId: "profile-work", navStatus: { _tag: "Idle" } },
+        { tabId: client.tabId, navStatus: client.navStatus },
+      ],
+    });
   }),
 );

@@ -37,7 +37,12 @@ import {
 import { ModelSelection } from "./modelSelection.ts";
 import { ProjectScript, type ProjectMutation } from "./project.ts";
 import { DEFAULT_RUNTIME_MODE, RuntimeMode } from "./providerPolicy.ts";
-import { BrowserProfile, BrowserProfileId, DEFAULT_BROWSER_PROFILE_ID } from "./browserProfile.ts";
+import {
+  AgentBrowserProfileGrant,
+  BrowserProfile,
+  BrowserProfileId,
+  DEFAULT_BROWSER_PROFILE_ID,
+} from "./browserProfile.ts";
 import {
   BrowserRecordingFrameRate,
   DEFAULT_BROWSER_RECORDING_FRAME_RATE,
@@ -1443,6 +1448,14 @@ export const ServerSettings = Schema.Struct({
   ),
 
   enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** Agent tabs use only Incognito and the persistent profiles `agentBrowserProfileGrants` allow. */
+  requireAgentBrowserProfileApproval: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+  ),
+  /** Keyed by agentBrowserProfileGrantKey. */
+  agentBrowserProfileGrants: Schema.Record(Schema.String, AgentBrowserProfileGrant).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
   /** Lets clients reach this machine's loopback ports over `/api/preview/tunnel`. */
   enablePreviewTunnel: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   cloudSpeechCredentials: CloudSpeechCredentials.pipe(
@@ -1914,6 +1927,11 @@ export const ServerSettingsPatch = Schema.Struct({
   keepAwakeWhileAgentsWork: Schema.optionalKey(Schema.Boolean),
   requireConnectDeviceApproval: Schema.optionalKey(Schema.Boolean),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
+  requireAgentBrowserProfileApproval: Schema.optionalKey(Schema.Boolean),
+  /** Null removes a grant. */
+  agentBrowserProfileGrants: Schema.optionalKey(
+    Schema.Record(Schema.String, Schema.NullOr(AgentBrowserProfileGrant)),
+  ),
   enablePreviewTunnel: Schema.optionalKey(Schema.Boolean),
   cloudSpeechCredentials: Schema.optionalKey(
     Schema.Struct({

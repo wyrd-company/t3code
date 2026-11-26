@@ -37,6 +37,8 @@ export class PreviewManager extends Context.Service<
         readonly automationOwner?: string;
         /** Runs before the `opened` event publishes, so subscribers find state keyed by the tab. */
         readonly beforePublish?: (snapshot: PreviewSessionSnapshot) => void;
+        /** Published headless from the start, so no desktop draws it even for a moment. */
+        readonly headless?: boolean;
       },
     ) => Effect.Effect<PreviewSessionSnapshot, PreviewError>;
     readonly reportStatus: (
@@ -211,6 +213,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
           ? { automationOwner: input.automationOwner }
           : {}),
         ...(input.reveal === undefined ? {} : { reveal: input.reveal }),
+        ...(runtime === "server" && input.headless === true ? { headless: true } : {}),
         updatedAt,
       };
       yield* SynchronizedRef.modifyEffect(stateRef, (state) =>

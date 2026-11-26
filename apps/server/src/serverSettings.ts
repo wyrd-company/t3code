@@ -450,6 +450,7 @@ function decodeSettingsFile(
           requireConnectDeviceApproval: true,
           enablePreviewTunnel: false,
           enableAgentBrowserAccess: false,
+          requireAgentBrowserProfileApproval: true,
           defaultRuntimeMode: "approval-required",
         };
   return { settings, legacy: Exit.isSuccess(legacy) ? legacy.value : undefined, failure };

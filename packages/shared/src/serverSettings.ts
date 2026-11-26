@@ -388,6 +388,14 @@ export function applyServerSettingsPatch(
   rawPatch: ServerSettingsPatch,
 ): ServerSettings {
   const patch = translateLegacyProjectOverridePatch(current, rawPatch);
+  const nextProviderInstances = patch.providerInstances;
+  const removedProviderInstances = new Set(
+    nextProviderInstances === undefined
+      ? []
+      : Object.keys(current.providerInstances).filter(
+          (instanceId) => !Object.hasOwn(nextProviderInstances, instanceId),
+        ),
+  );
   const selectionPatch = patch.textGenerationModelSelection;
   const {
     migrateModelPreferences,
@@ -407,6 +415,7 @@ export function applyServerSettingsPatch(
     sourceControlHosts: sourceControlHostsPatch,
     usagePriceOverrides: usagePriceOverridesPatch,
     usageModelAliases: usageModelAliasesPatch,
+    agentBrowserProfileGrants: agentBrowserProfileGrantsPatch,
     // Entry replacement: deepMerge would keep keys the client meant to clear.
     projectSettingsOverrides: projectSettingsOverridesPatch,
     projectAgentBrowserAccessOverrides: _legacyBrowserAccess,
@@ -639,6 +648,22 @@ export function applyServerSettingsPatch(
           usageModelAliases: mergeSettingsEntries(
             current.usageModelAliases,
             usageModelAliasesPatch,
+          ),
+        }
+      : {}),
+    ...(agentBrowserProfileGrantsPatch !== undefined || removedProviderInstances.size > 0
+      ? {
+          agentBrowserProfileGrants: Object.fromEntries(
+            Object.entries(
+              mergeSettingsEntries(
+                current.agentBrowserProfileGrants,
+                agentBrowserProfileGrantsPatch ?? {},
+              ),
+            ).filter(
+              // A later instance can reuse a removed one's id; it must not inherit its grants.
+              ([, grant]) =>
+                grant.scope !== "providerInstance" || !removedProviderInstances.has(grant.scopeId),
+            ),
           ),
         }
       : {}),

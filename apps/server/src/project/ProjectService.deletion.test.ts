@@ -532,6 +532,10 @@ it.effect.each([
               ...(worktreeCleanup === undefined ? {} : { worktreeCleanup }),
             },
           },
+          agentBrowserProfileGrants: {
+            deleted: { profileId: "profile-work", scope: "project", scopeId: projectId },
+            other: { profileId: "profile-work", scope: "project", scopeId: "project:other" },
+          },
         });
 
         yield* service.delete({
@@ -539,6 +543,10 @@ it.effect.each([
           projectId,
         });
 
+        assert.deepStrictEqual(
+          Object.keys((yield* serverSettings.getSettings).agentBrowserProfileGrants),
+          ["other"],
+        );
         const entry = (yield* serverSettings.getSettings).projectSettingsOverrides[projectId];
         if (worktreeCleanup === undefined) {
           assert.isUndefined(entry);

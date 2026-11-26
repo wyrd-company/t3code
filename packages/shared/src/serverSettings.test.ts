@@ -702,6 +702,40 @@ describe("serverSettings helpers", () => {
     expect(Object.keys(removed.secretProviders)).toEqual([work]);
   });
 
+  it("adds and revokes agent browser profile grants per entry", () => {
+    const thread = { profileId: "profile-work", scope: "thread", scopeId: "thread-1" } as const;
+    const project = { profileId: "profile-work", scope: "project", scopeId: "project-1" } as const;
+    const added = applyServerSettingsPatch(
+      applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+        agentBrowserProfileGrants: { thread },
+      }),
+      { agentBrowserProfileGrants: { project } },
+    );
+    expect(added.agentBrowserProfileGrants).toEqual({ thread, project });
+
+    const revoked = applyServerSettingsPatch(added, {
+      agentBrowserProfileGrants: { thread: null },
+    });
+    expect(revoked.agentBrowserProfileGrants).toEqual({ project });
+  });
+
+  it("drops a removed provider instance's browser profile grants", () => {
+    const instance = { driver: ProviderDriverKind.make("codex"), enabled: true, config: {} };
+    const work = ProviderInstanceId.make("codex-work");
+    const personal = ProviderInstanceId.make("codex-personal");
+    const grant = (scopeId: string) =>
+      ({ profileId: "profile-work", scope: "providerInstance", scopeId }) as const;
+    const thread = { profileId: "profile-work", scope: "thread", scopeId: work } as const;
+    const current = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      providerInstances: { [work]: instance, [personal]: instance },
+      agentBrowserProfileGrants: { work: grant(work), personal: grant(personal), thread },
+    });
+    const removed = applyServerSettingsPatch(current, {
+      providerInstances: { [personal]: instance },
+    });
+    expect(removed.agentBrowserProfileGrants).toEqual({ personal: grant(personal), thread });
+  });
+
   it("replaces and removes individual usage prices without clobbering other models", () => {
     const prices = { inputCostPerMillionTokens: 2, outputCostPerMillionTokens: 8 };
     const current = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {

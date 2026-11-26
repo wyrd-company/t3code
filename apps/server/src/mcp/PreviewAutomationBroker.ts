@@ -1,4 +1,5 @@
 import {
+  BrowserProfileId,
   PREVIEW_AUTOMATION_V1_OPERATIONS,
   PreviewAutomationClientDisconnectedError,
   PreviewAutomationControlInterruptedError,
@@ -7,6 +8,7 @@ import {
   SERVER_BROWSER_AUTOMATION_CLIENT_ID,
   PreviewAutomationInvalidSelectorError,
   PreviewAutomationMalformedResponseError,
+  PreviewAutomationProfileApprovalRequiredError,
   PreviewAutomationNoAvailableHostError,
   PreviewAutomationRemoteUnavailableError,
   PreviewAutomationRecordingTransferError,
@@ -216,6 +218,9 @@ const readRemoteReason = (detail: unknown): string | undefined =>
 
 const MAX_REASON_CHARS = 500;
 const decodeTimeoutDetail = Schema.decodeUnknownOption(PreviewAutomationTimeoutDetail);
+const decodeProfileApprovalDetail = Schema.decodeUnknownOption(
+  Schema.Struct({ profileId: BrowserProfileId, profileName: Schema.String }),
+);
 
 const classifyResponseError = (
   context: PreviewAutomationRequestErrorContext,
@@ -286,6 +291,20 @@ const classifyResponseError = (
         ...remoteDiagnostics,
         ...(Option.isSome(reason) ? { reason: reason.value } : {}),
       });
+    }
+    case "PreviewAutomationProfileApprovalRequiredError": {
+      const detail = decodeProfileApprovalDetail(error.detail);
+      return Option.isSome(detail)
+        ? new PreviewAutomationProfileApprovalRequiredError({
+            ...context,
+            ...remoteDiagnostics,
+            ...detail.value,
+          })
+        : new PreviewAutomationExecutionError({
+            ...context,
+            ...remoteDiagnostics,
+            reason: error.message.slice(0, MAX_REASON_CHARS),
+          });
     }
     case "PreviewAutomationInvalidSelectorError": {
       const staleRef =
@@ -645,6 +664,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
             tabId: requestContext.tabId,
             tabIdExplicit: input.tabId !== undefined,
             agentSessionId: hostAssignmentKey(input.scope),
+            providerInstanceId: input.scope.thread.providerInstanceId,
             operation: input.operation,
             input: input.input,
             timeoutMs,

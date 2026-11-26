@@ -57,3 +57,44 @@ export function findBrowserProfile(
 ): BrowserProfile | undefined {
   return id === undefined ? undefined : profiles.find((profile) => profile.id === id);
 }
+
+/** How widely an approval lets agents use a persistent profile. */
+export const AgentBrowserProfileGrantScope = Schema.Literals([
+  "thread",
+  "project",
+  "providerInstance",
+]);
+export type AgentBrowserProfileGrantScope = typeof AgentBrowserProfileGrantScope.Type;
+
+/** Lets agents use `profileId` in the thread, project or provider instance `scopeId` names. */
+export const AgentBrowserProfileGrant = Schema.Struct({
+  profileId: BrowserProfileId,
+  /** The name when approved, for clients that do not hold the profile, such as mobile. */
+  profileName: Schema.optional(TrimmedNonEmptyString),
+  scope: AgentBrowserProfileGrantScope,
+  scopeId: TrimmedNonEmptyString,
+});
+export type AgentBrowserProfileGrant = typeof AgentBrowserProfileGrant.Type;
+
+/** The settings key of a grant, so racing approvals and removals each touch only their own. */
+export const agentBrowserProfileGrantKey = (grant: AgentBrowserProfileGrant): string =>
+  JSON.stringify([grant.scope, grant.scopeId, grant.profileId]);
+
+export function isAgentBrowserProfileGranted(
+  grants: Readonly<Record<string, AgentBrowserProfileGrant>>,
+  input: {
+    readonly profileId: string;
+    readonly threadId: string;
+    readonly projectId: string;
+    readonly providerInstanceId: string;
+  },
+): boolean {
+  const scopeIds: Record<AgentBrowserProfileGrantScope, string> = {
+    thread: input.threadId,
+    project: input.projectId,
+    providerInstance: input.providerInstanceId,
+  };
+  return Object.values(grants).some(
+    (grant) => grant.profileId === input.profileId && grant.scopeId === scopeIds[grant.scope],
+  );
+}

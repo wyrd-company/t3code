@@ -2592,6 +2592,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
       assert.isTrue(settings.requireConnectDeviceApproval);
       assert.isFalse(settings.enablePreviewTunnel);
       assert.isFalse(settings.enableAgentBrowserAccess);
+      // Agents already running keep their browser tools, so they must keep asking.
+      assert.isTrue(settings.requireAgentBrowserProfileApproval);
       assert.equal(settings.defaultRuntimeMode, "approval-required");
       assert.deepEqual(settings.projectSettingsOverrides, {});
 

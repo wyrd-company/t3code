@@ -8,12 +8,18 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { it } from "@effect/vitest";
 import {
+  agentBrowserProfileGrantKey,
   type BrowserRecordingFrameRate,
+  DEFAULT_BROWSER_PROFILE_ID,
   EnvironmentId,
+  INCOGNITO_BROWSER_PROFILE_ID,
   PreviewTabId,
+  ProjectId,
   ProviderInstanceId,
   ThreadId,
+  type OrchestrationV2ThreadShell,
   type PreviewAutomationLoadError,
+  type PreviewAutomationOperation,
   type PreviewAutomationResizeResult,
   type PreviewAutomationSnapshot,
   type PreviewAutomationStatus,
@@ -38,6 +44,8 @@ import { beforeEach, expect, vi } from "vite-plus/test";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as Broker from "../mcp/PreviewAutomationBroker.ts";
+import * as ProjectionStoreV2 from "../orchestration-v2/ProjectionStore.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as DesktopChannel from "./DesktopBrowserChannel.ts";
 import * as Manager from "./Manager.ts";
 import * as PreviewAgentActivity from "./PreviewAgentActivity.ts";
@@ -454,6 +462,10 @@ const asSession = (providerSessionId: string) => ({
   ...scope,
   thread: { ...testThread, providerSessionId },
 });
+const projectThread = ThreadId.make("browser-project-thread");
+const browserProject = ProjectId.make("browser-project");
+/** The project each test thread belongs to, as the projection store reports it. */
+const threadProjects: ReadonlyMap<string, ProjectId> = new Map([[projectThread, browserProject]]);
 const dependencies = Layer.mergeAll(
   Broker.layer,
   Manager.layer,
@@ -539,6 +551,18 @@ const dependencies = Layer.mergeAll(
     turn: (threadId, active) => Effect.sync(() => desktopTurns.emit("turn", threadId, active)),
   }),
   PreviewAgentActivity.layer,
+  ServerSettings.layerTest(),
+  Layer.mock(ProjectionStoreV2.ProjectionStoreV2)({
+    getThreadShell: (threadId) =>
+      Effect.succeed(
+        threadProjects.has(threadId)
+          ? ({
+              projectId: threadProjects.get(threadId),
+              providerInstanceId: testThread.providerInstanceId,
+            } as OrchestrationV2ThreadShell)
+          : null,
+      ),
+  }),
 ).pipe(
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-server-browser-" })),
   Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
@@ -4087,6 +4111,159 @@ it.effect("a report interrupted while an earlier save holds the lock is still sa
   }).pipe(Effect.provide(dependencies)),
 );
 
+it.effect("with no profile catalog reported, a granted built-in Default is the agent default", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* Broker.PreviewAutomationBroker;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      yield* Effect.yieldNow;
+      yield* settings.updateSettings({ requireAgentBrowserProfileApproval: true });
+      const projectScope = { ...scope, thread: { ...testThread, threadId: projectThread } };
+      const open = () =>
+        broker.invoke<PreviewAutomationStatus>({
+          scope: projectScope,
+          operation: "open",
+          input: { reuseExistingTab: false, show: false },
+        });
+      const profileOf = (status: PreviewAutomationStatus) =>
+        status.tabs?.find((tab) => tab.tabId === status.tabId)?.profileId;
+
+      const incognito = yield* open();
+      expect(profileOf(incognito)).toBe(INCOGNITO_BROWSER_PROFILE_ID);
+      expect(incognito.defaultProfileId).toBe(INCOGNITO_BROWSER_PROFILE_ID);
+
+      const grant = {
+        profileId: DEFAULT_BROWSER_PROFILE_ID,
+        scope: "project",
+        scopeId: browserProject,
+      } as const;
+      yield* settings.updateSettings({
+        agentBrowserProfileGrants: { [agentBrowserProfileGrantKey(grant)]: grant },
+      });
+      const signedIn = yield* open();
+      expect(profileOf(signedIn)).toBe(DEFAULT_BROWSER_PROFILE_ID);
+      expect(signedIn.defaultProfileId).toBe(DEFAULT_BROWSER_PROFILE_ID);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.effect("while approval is required, agents use Incognito and only the profiles granted", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const browser = yield* ServerBrowser.ServerBrowser;
+      const broker = yield* Broker.PreviewAutomationBroker;
+      const manager = yield* Manager.PreviewManager;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      yield* Effect.yieldNow;
+      yield* (yield* browser.profileReporter)({
+        profiles: [{ id: "profile-work", name: "Work", kind: "persistent" }],
+        defaultProfileId: "profile-work",
+      });
+      yield* settings.updateSettings({ requireAgentBrowserProfileApproval: true });
+      const projectScope = { ...scope, thread: { ...testThread, threadId: projectThread } };
+      const invoke = <A>(operation: PreviewAutomationOperation, input: object, tabId?: string) =>
+        broker.invoke<A>({
+          scope: projectScope,
+          operation,
+          input,
+          ...(tabId === undefined ? {} : { tabId: PreviewTabId.make(tabId) }),
+        });
+      const open = (profileId?: string) =>
+        invoke<PreviewAutomationStatus>("open", {
+          reuseExistingTab: false,
+          show: false,
+          ...(profileId === undefined ? {} : { profileId }),
+        });
+      const profileOf = (status: PreviewAutomationStatus) =>
+        status.tabs?.find((tab) => tab.tabId === status.tabId)?.profileId;
+      const approvalRequired = {
+        _tag: "PreviewAutomationProfileApprovalRequiredError",
+        profileId: "profile-work",
+        profileName: "Work",
+      };
+
+      // Nobody chose the default for agents, so a tab naming no profile opens in Incognito.
+      const incognito = yield* open();
+      expect(profileOf(incognito)).toBe(INCOGNITO_BROWSER_PROFILE_ID);
+      expect(incognito.defaultProfileId).toBe(INCOGNITO_BROWSER_PROFILE_ID);
+      expect(yield* Effect.flip(open("Work"))).toMatchObject(approvalRequired);
+      const human = yield* manager.open({
+        threadId: projectThread,
+        url: "https://mail.example/inbox",
+        runtime: "server",
+        profileId: "profile-work",
+      });
+      expect(
+        yield* Effect.flip(invoke<string>("evaluate", { expression: "read()" }, human.tabId)),
+      ).toMatchObject(approvalRequired);
+      // Status still names the tab and its profile, so the agent can ask, but not the page.
+      const locked = yield* invoke<PreviewAutomationStatus>("status", {}, human.tabId);
+      expect(locked).toMatchObject({ url: null, title: null, profileApprovalRequired: true });
+      expect(locked.tabs?.find((tab) => tab.tabId === human.tabId)).toMatchObject({
+        url: null,
+        profileId: "profile-work",
+        profileApprovalRequired: true,
+      });
+      // Reusing it asks for the profile first; a pending dialog on the page stays unsaid.
+      const humanDialog = {
+        type: () => "alert",
+        message: () => "Signed in as you",
+        defaultValue: () => "",
+        accept: vi.fn(async () => {}),
+        dismiss: vi.fn(async () => {}),
+      };
+      contexts.at(-1)!.page.emit("dialog", humanDialog);
+      expect(
+        yield* Effect.flip(invoke<PreviewAutomationStatus>("open", { show: false }, human.tabId)),
+      ).toMatchObject(approvalRequired);
+
+      const grant = {
+        profileId: "profile-work",
+        scope: "project",
+        scopeId: browserProject,
+      } as const;
+      const key = agentBrowserProfileGrantKey(grant);
+      yield* settings.updateSettings({ agentBrowserProfileGrants: { [key]: grant } });
+      yield* invoke("dialog", { accept: true }, human.tabId);
+      const work = yield* open();
+      expect(profileOf(work)).toBe("profile-work");
+      expect(work.defaultProfileId).toBe("profile-work");
+      expect(yield* invoke("evaluate", { expression: "read()" }, human.tabId)).toBe("evaluated");
+      expect(yield* invoke<PreviewAutomationStatus>("status", {}, human.tabId)).toMatchObject({
+        url: "https://mail.example/inbox",
+      });
+
+      // An action queued behind a running one finds the grant gone when its turn comes.
+      const session = contexts.flatMap((context) => context.sessions).at(-1)!;
+      const started = Promise.withResolvers<void>();
+      const finish = Promise.withResolvers<Record<string, unknown>>();
+      session.send.mockImplementationOnce(async () => {
+        started.resolve();
+        return finish.promise;
+      });
+      const running = yield* invoke("evaluate", { expression: "first()" }, work.tabId!).pipe(
+        Effect.forkScoped,
+      );
+      yield* Effect.promise(() => started.promise);
+      const queued = yield* invoke<string>(
+        "evaluate",
+        { expression: "second()" },
+        work.tabId!,
+      ).pipe(Effect.flip, Effect.forkScoped);
+
+      // A removed grant reaches the tabs it opened, and closing them stays possible.
+      yield* settings.updateSettings({ agentBrowserProfileGrants: { [key]: null } });
+      finish.resolve({ result: { value: "finished" } });
+      expect(yield* Fiber.join(running)).toBe("finished");
+      expect(yield* Fiber.join(queued)).toMatchObject(approvalRequired);
+      expect(
+        yield* Effect.flip(invoke<string>("evaluate", { expression: "read()" }, work.tabId!)),
+      ).toMatchObject(approvalRequired);
+      yield* invoke("close", {}, work.tabId!);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
 it.effect("profiles reported by one client survive another client's report", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -4580,6 +4757,254 @@ it.effect("reports a desktop tab's load failure from before the server connected
       });
       expect(yield* status()).not.toHaveProperty("loadError");
       expect(yield* snapshot()).not.toHaveProperty("loadError");
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.effect("a provider's grant covers only calls from that provider", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const browser = yield* ServerBrowser.ServerBrowser;
+      const broker = yield* Broker.PreviewAutomationBroker;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      yield* Effect.yieldNow;
+      yield* (yield* browser.profileReporter)({
+        profiles: [{ id: "profile-work", name: "Work", kind: "persistent" }],
+        defaultProfileId: "profile-work",
+      });
+      yield* settings.updateSettings({
+        requireAgentBrowserProfileApproval: true,
+        agentBrowserProfileGrants: {
+          codex: { profileId: "profile-work", scope: "providerInstance", scopeId: "codex" },
+        },
+      });
+      // The thread now runs on codex, but this call was admitted for claude.
+      const open = (providerInstanceId: string) =>
+        broker.invoke<PreviewAutomationStatus>({
+          scope: {
+            ...scope,
+            thread: {
+              ...testThread,
+              threadId: projectThread,
+              providerSessionId: providerInstanceId,
+              providerInstanceId: ProviderInstanceId.make(providerInstanceId),
+            },
+          },
+          operation: "open",
+          input: { reuseExistingTab: false, show: false, profileId: "Work" },
+        });
+      expect(yield* Effect.flip(open("claude"))).toMatchObject({
+        _tag: "PreviewAutomationProfileApprovalRequiredError",
+      });
+      expect((yield* open("codex")).defaultProfileId).toBe("profile-work");
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.effect("a recording of a profile whose grant was removed stops without being handed over", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const browser = yield* ServerBrowser.ServerBrowser;
+      const broker = yield* Broker.PreviewAutomationBroker;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      const projectScope = { ...scope, thread: { ...testThread, threadId: projectThread } };
+      yield* Effect.yieldNow;
+      yield* (yield* browser.profileReporter)({
+        profiles: [{ id: "profile-work", name: "Work", kind: "persistent" }],
+        defaultProfileId: "profile-work",
+      });
+      const grant = { profileId: "profile-work", scope: "thread", scopeId: projectThread } as const;
+      yield* settings.updateSettings({
+        requireAgentBrowserProfileApproval: true,
+        agentBrowserProfileGrants: { work: grant },
+      });
+      const opened = yield* broker.invoke<PreviewAutomationStatus>({
+        scope: projectScope,
+        operation: "open",
+        input: { reuseExistingTab: false, show: false },
+      });
+      const tabId = PreviewTabId.make(opened.tabId!);
+      yield* broker.invoke({ scope: projectScope, tabId, operation: "recordingStart", input: {} });
+      yield* settings.updateSettings({ agentBrowserProfileGrants: { work: null } });
+      const captures = () =>
+        contexts
+          .flatMap((context) => context.sessions)
+          .flatMap((session) => session.send.mock.calls)
+          .filter(([method]) => method === "Page.captureScreenshot").length;
+      const capturedBefore = captures();
+      const stop = () =>
+        broker
+          .invoke<void>({ scope: projectScope, tabId, operation: "recordingStop", input: {} })
+          .pipe(Effect.flip);
+      expect(yield* stop()).toMatchObject({
+        _tag: "PreviewAutomationProfileApprovalRequiredError",
+      });
+      // No last frame of the page it may no longer see.
+      expect(captures()).toBe(capturedBefore);
+      expect(yield* stop()).toMatchObject({
+        cause: { _tag: "PreviewAutomationRecordingNotActiveError" },
+      });
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.effect("a recording whose grant is removed while it is saved is deleted, not handed over", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* Broker.PreviewAutomationBroker;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      const fs = yield* FileSystem.FileSystem;
+      const { attachmentsDir } = yield* ServerConfig.ServerConfig;
+      const projectScope = { ...scope, thread: { ...testThread, threadId: projectThread } };
+      yield* Effect.yieldNow;
+      yield* (yield* (yield* ServerBrowser.ServerBrowser).profileReporter)({
+        profiles: [{ id: "profile-work", name: "Work", kind: "persistent" }],
+        defaultProfileId: "profile-work",
+      });
+      const grant = { profileId: "profile-work", scope: "thread", scopeId: projectThread } as const;
+      yield* settings.updateSettings({
+        requireAgentBrowserProfileApproval: true,
+        agentBrowserProfileGrants: { work: grant },
+      });
+      const opened = yield* broker.invoke<PreviewAutomationStatus>({
+        scope: projectScope,
+        operation: "open",
+        input: { reuseExistingTab: false, show: false },
+      });
+      const tabId = PreviewTabId.make(opened.tabId!);
+      yield* broker.invoke({ scope: projectScope, tabId, operation: "recordingStart", input: {} });
+      // The user removes the grant once the stop has passed its first check.
+      const stopping = Promise.withResolvers<void>();
+      const removed = Promise.withResolvers<void>();
+      for (const session of contexts.flatMap((context) => context.sessions)) {
+        const send = session.send.getMockImplementation()!;
+        session.send.mockImplementation(async (method, input) => {
+          if (method === "Page.stopScreencast") {
+            stopping.resolve();
+            await removed.promise;
+          }
+          return send(method, input);
+        });
+      }
+      const listAttachments = () =>
+        fs.readDirectory(attachmentsDir).pipe(Effect.orElseSucceed(() => []));
+      const before = yield* listAttachments();
+      const stop = yield* broker
+        .invoke<void>({ scope: projectScope, tabId, operation: "recordingStop", input: {} })
+        .pipe(Effect.flip, Effect.forkChild);
+      yield* Effect.promise(() => stopping.promise);
+      yield* settings.updateSettings({ agentBrowserProfileGrants: { work: null } });
+      removed.resolve();
+      expect(yield* Fiber.join(stop)).toMatchObject({
+        _tag: "PreviewAutomationProfileApprovalRequiredError",
+      });
+      expect(yield* listAttachments()).toEqual(before);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.effect(
+  "while approval is required, agent Incognito stays off the desktop's shared session",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const broker = yield* Broker.PreviewAutomationBroker;
+        const manager = yield* Manager.PreviewManager;
+        const settings = yield* ServerSettings.ServerSettingsService;
+        const projectScope = { ...scope, thread: { ...testThread, threadId: projectThread } };
+        yield* Effect.yieldNow;
+        yield* settings.updateSettings({
+          requireAgentBrowserProfileApproval: true,
+          agentBrowserProfileGrants: {
+            default: { profileId: "default", scope: "project", scopeId: browserProject },
+          },
+        });
+        // The desktop draws a human tab naming no profile in its own default, which may not be
+        // the Default this grant names.
+        desktopRendersNext = true;
+        const readHuman = (profileId?: string) =>
+          Effect.gen(function* () {
+            desktopRendersNext = true;
+            const human = yield* manager.open({
+              threadId: projectThread,
+              runtime: "server",
+              ...(profileId === undefined ? {} : { profileId }),
+            });
+            return yield* broker
+              .invoke<string>({
+                scope: projectScope,
+                tabId: PreviewTabId.make(human.tabId),
+                operation: "evaluate",
+                input: { expression: "read()" },
+              })
+              .pipe(Effect.flip);
+          });
+        const uncovered = { _tag: "PreviewAutomationControlInterruptedError" };
+        expect(yield* readHuman()).toMatchObject(uncovered);
+        // The desktop's one Incognito session is shared with the user's own Incognito tabs.
+        expect(yield* readHuman(INCOGNITO_BROWSER_PROFILE_ID)).toMatchObject(uncovered);
+
+        desktopRendersNext = true;
+        contextRequests.length = 0;
+        const events = yield* manager.subscribeEvents;
+        const opened = yield* broker.invoke<PreviewAutomationStatus>({
+          scope: projectScope,
+          operation: "open",
+          input: { reuseExistingTab: false, show: false, profileId: "incognito" },
+        });
+        let event = yield* PubSub.take(events);
+        while (event.type !== "opened" || event.tabId !== opened.tabId)
+          event = yield* PubSub.take(events);
+        // Headless from its first snapshot, so no desktop mounts it even briefly.
+        expect(event.snapshot.headless).toBe(true);
+        expect(opened.tabs?.find((tab) => tab.tabId === opened.tabId)?.profileId).toBe(
+          INCOGNITO_BROWSER_PROFILE_ID,
+        );
+        expect(contextRequests).toEqual([
+          { profileId: INCOGNITO_BROWSER_PROFILE_ID, isolated: true },
+        ]);
+      }),
+    ).pipe(Effect.provide(layer)),
+);
+
+it.effect("a popup of an isolated agent tab stays usable once approval is required", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* Broker.PreviewAutomationBroker;
+      const manager = yield* Manager.PreviewManager;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      const projectScope = { ...scope, thread: { ...testThread, threadId: projectThread } };
+      yield* Effect.yieldNow;
+      // With no client report, an agent tab gets a context of its own and names no profile.
+      yield* broker.invoke({
+        scope: projectScope,
+        operation: "open",
+        input: { reuseExistingTab: false, show: false },
+      });
+      yield* settings.updateSettings({ requireAgentBrowserProfileApproval: true });
+      const events = yield* manager.subscribeEvents;
+      contexts[0]!.page.emit("popup", makeContext().page);
+      let event = yield* PubSub.take(events);
+      while (event.type !== "opened") event = yield* PubSub.take(events);
+      expect(event.snapshot.profileId).toBe(INCOGNITO_BROWSER_PROFILE_ID);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.effect("a popup of a server tab in the default profile names that profile", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const browser = yield* ServerBrowser.ServerBrowser;
+      const manager = yield* Manager.PreviewManager;
+      yield* Effect.yieldNow;
+      const opened = yield* manager.open({ threadId: scope.thread.threadId, runtime: "server" });
+      yield* browser.attachViewer(viewerInput(opened.tabId, true));
+      const events = yield* manager.subscribeEvents;
+      contexts[0]!.page.emit("popup", makeContext().page);
+      let event = yield* PubSub.take(events);
+      while (event.type !== "opened") event = yield* PubSub.take(events);
+      // It shares its opener's signed-in context, so a tab listing must not take it for Incognito.
+      expect(event.snapshot.profileId).toBe(DEFAULT_BROWSER_PROFILE_ID);
     }),
   ).pipe(Effect.provide(layer)),
 );
