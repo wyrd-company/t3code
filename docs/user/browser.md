@@ -27,5 +27,6 @@ Configure defaults in **Settings → Browser**:
 Agents can open tabs, navigate, click, type, inspect accessibility snapshots, and take screenshots using T3 Code's `preview_*` tools.
 
 - Toggle **Settings → Browser → Agent browser access** (per environment or project override; takes effect when the next agent session starts).
+- **Signed-in profiles**: By default agents use your default profile and its logins. Turn on **Settings → Browser → Ask before agents use signed-in profiles** (per environment) to open agent tabs in Incognito instead, until you allow your default profile; on desktop these run in T3 Code's built-in Chromium, separate from your own Incognito tabs. When an agent needs a signed-in profile, the thread shows a card asking you to allow it for this thread, this project, or this provider; the agent waits for your answer. Approvals are listed under **Allowed profiles** in the same settings page, where removing one also stops agent tabs already open in that profile. Allowing beyond the thread needs permission to change settings.
 - **Floating preview**: By default, agent-opened tabs float over chat (**Settings → Browser → Auto-show floating preview**). Turn this off to open them in the right panel instead.
 - **Take control**: Click **Take control** before interacting with an agent's tab, and release control when you want the agent to resume.

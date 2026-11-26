@@ -48,11 +48,13 @@ revocation and ceilings hold, not what a full-scope session can do once issued.
    calling a write tool.
 3. **Mode or policy escalation.** An agent, MCP client, or peer link acting
    above its runtime-mode ceiling, `linkOrigin`, `T3-Mode-Limit`, or managed
-   policy.
+   policy, or an agent below full access using a signed-in browser profile
+   through the preview tools that nobody allowed, while the environment asks
+   first (`requireAgentBrowserProfileApproval`).
 4. **Guest escape.** A guest token reading another thread, acting beyond
    proposing messages, or surviving a closed or replaced share.
 5. **Revocation that doesn't take effect.** A revoked session, device key,
-   pairing link, or peer link that still works. Documented exception: signed
+   pairing link, peer link, or browser profile grant that still works. Documented exception: signed
    asset URLs last until they expire.
 6. **Credential exposure.** Tokens or secrets reaching logs, traces, telemetry,
    the relay, socket URLs (outside short-lived tickets), the access read model,
@@ -134,6 +136,7 @@ revocation and ceilings hold, not what a full-scope session can do once issued.
 - Managed policy: [`apps/server/src/policy`](apps/server/src/policy)
 - T3 Connect: [`cloud/CloudLink.ts`](apps/server/src/cloud/CloudLink.ts), [`EnvironmentConnector.ts`](infra/relay/src/environments/EnvironmentConnector.ts)
 - Desktop preview isolation: [`preview/WebviewPreferences.ts`](apps/desktop/src/preview/WebviewPreferences.ts)
+- Agent browser profiles: [`preview/ServerBrowser.ts`](apps/server/src/preview/ServerBrowser.ts), [`preview/BrowserProfileRequests.ts`](apps/server/src/preview/BrowserProfileRequests.ts)
 
 ## How to audit and triage
 

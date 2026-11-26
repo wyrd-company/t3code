@@ -126,6 +126,14 @@ model.
   there is and is taken as the person's answer.
   What those files go on to run, such as a package script or a file they source, is not part of
   the digest, so an approval is for the named files and not for everything the push executes.
+- **An agent drives a signed-in browser profile only as a person allowed it, when the environment
+  asks first.** [`ServerBrowser`](../../apps/server/src/preview/ServerBrowser.ts) checks each agent
+  operation as it starts, against the provider of the caller's MCP scope (a thread can switch
+  providers mid-run), and judges a tab by the storage it really uses: a desktop draws a tab naming
+  no profile in the device's default and shares one Incognito session with the person's own tabs,
+  so the server refuses both and runs agent Incognito itself. The orchestrator must refuse an
+  approval from a replaced or stopped attempt before its grant exists, so the card is recorded
+  first. A grant beyond the thread changes later threads and needs `settings:write`.
 - **Peer-link client pairing.** Only a full-access peer link may mint a one-time client pairing on
   the linked environment (since full-access agents can already run `t3 auth pairing create`). The
   linked side enforces this itself, and the operation stays a human-triggered RPC/HTTP route rather
